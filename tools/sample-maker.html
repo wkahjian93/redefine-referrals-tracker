@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sample maker</title>
+<body style="font-family:sans-serif;background:#ddd">
+<p id="st">Working…</p>
+<canvas id="out" style="max-width:100%;border:1px solid #999"></canvas>
+<script src="/tools/pdf.min.js"></script>
+<script>
+// Makes test/fixtures/sample-page.jpg: page 3 of the real referral book, filled in with FAKE people in handwriting fonts,
+// as if photographed on a desk. Also writes sample-reply.json = what a perfect AI reading would return (used as the
+// stand-in AI reply by the local test server), and the app icons as PNG.
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/tools/pdf.worker.min.js';
+const save = (name, body) => fetch('/__save?name=' + name, {method: 'POST', body});
+(async () => {
+  await document.fonts.load('40px "Ink Free"'); await document.fonts.load('40px "Segoe Print"');
+  const pdf = await pdfjsLib.getDocument('/fixtures/referral-book.pdf').promise, page = await pdf.getPage(3);
+  const vp0 = page.getViewport({scale: 1}), k = 1180 / vp0.width, vp = page.getViewport({scale: k});
+  const pc = document.createElement('canvas'); pc.width = vp.width; pc.height = vp.height;
+  await page.render({canvasContext: pc.getContext('2d'), viewport: vp}).promise;
+  const PW = pc.width, PH = pc.height, M = 46;
+  const c = document.getElementById('out'); c.width = PW + 2 * M; c.height = PH + 2 * M;
+  const g = c.getContext('2d');
+  g.fillStyle = '#7d6a55'; g.fillRect(0, 0, c.width, c.height);   // wooden desk
+  g.shadowColor = 'rgba(0,0,0,.45)'; g.shadowBlur = 24; g.shadowOffsetY = 8; g.drawImage(pc, M, M); g.shadowColor = 'transparent';
+  // page coordinates measured on the 924 x 1314 preview of this page
+  const sx = PW / 924, sy = PH / 1314, X = v => M + v * sx, Y = v => M + v * sy;
+  const boxes = [];
+  function write(text, x, y, size, font, color, priv) {
+    g.font = Math.round(size * sx) + 'px ' + (font || '"Ink Free"'); g.fillStyle = color || '#1d2a7a'; g.textBaseline = 'alphabetic';
+    g.save(); g.translate(X(x), Y(y)); g.rotate((Math.random() - .5) * 0.03); g.fillText(text, 0, 0); g.restore();
+    if (priv) { const w = g.measureText(text).width; boxes.push({type: priv, x: (X(x) - 4) / c.width, y: (Y(y) - size * sy * 0.95) / c.height, w: (w + 8) / c.width, h: (size * sy * 1.25) / c.height}); }
+  }
+  const people = [
+    {name: 'Lim Wei Jie', age: '29', phone: '012-488 2391', g: 'M', L: 'Bayan Lepas', W: 'Engineer (Intel)', R: 'Cousin', S: 'Married, 1 kid'},
+    {name: 'Chong Mei Yee', age: '34', phone: '016-552 7810', g: 'F', L: 'Jelutong', W: 'Nurse', R: 'Ex-colleague', S: 'Asked about medical card'},
+    {name: 'Muhammad Faiz', age: '26', phone: '011-2093 4475', g: 'M', L: 'Butterworth', W: 'Sales exec', R: 'Gym kaki', S: ''},
+    {name: '黄美玲 Ng Bee Leng', age: '41', phone: '017-430 6621', g: 'F', L: 'Air Itam', W: 'Own bakery', R: 'Neighbour', S: '2 kids'}
+  ];
+  write('Tan Siew Lan', 232, 180, 30, null, null, 'giver');   // the client who gave the referrals
+  const tops = [330, 495, 660, 826];
+  people.forEach((p, i) => {
+    const t = tops[i];
+    write(p.name, 228, t + 27, 26, /[一-鿿]/.test(p.name) ? '"Segoe Print"' : '"Ink Free"');
+    write(p.age, 240, t + 63, 24, null, null, 'age');
+    write(p.phone, 232, t + (i ? 103 : 99), 24, null, null, 'phone');
+    write(p.g, 262, t + 140, 24);
+    [['L', 0], ['W', 35], ['R', 70], ['S', 105]].forEach(([key, dy]) => { if (p[key]) write(p[key], 552, t + 20 + dy, 20, null, null, 'remarks'); });
+  });
+  document.getElementById('st').textContent = 'Saving…';
+  await save('sample-page.jpg', c.toDataURL('image/jpeg', 0.9).split(',')[1]);
+  const reply = {kind: 'referral_page', giver: 'Tan Siew Lan',
+    rows: people.map((p, i) => ({no: i + 1, name: p.name, age: p.age, phone: p.phone, gender: p.g, remarks: ['L', 'W', 'R', 'S'].filter(k => p[k]).map(k => k + ': ' + p[k]).join(' '), unclear: false})),
+    private: boxes, faces: [], notes: '(Test server stand-in reply, written to match this sample page. Row 5 is empty.)'};
+  await save('sample-reply.json', JSON.stringify(reply, null, 1));
+  // icons
+  const svg = await (await fetch('/icons/icon.svg')).text(), img = new Image();
+  img.src = 'data:image/svg+xml;base64,' + btoa(svg); await img.decode();
+  for (const [name, size] of [['icon-192.png', 192], ['icon-512.png', 512], ['apple-touch-icon.png', 180]]) {
+    const ic = document.createElement('canvas'); ic.width = ic.height = size; const ig = ic.getContext('2d');
+    if (name.startsWith('apple')) { ig.fillStyle = '#0B0C10'; ig.fillRect(0, 0, size, size); }
+    ig.drawImage(img, 0, 0, size, size);
+    await save(name, ic.toDataURL('image/png').split(',')[1]);
+  }
+  document.getElementById('st').textContent = 'Done: ' + boxes.length + ' private boxes';
+})().catch(e => { document.getElementById('st').textContent = 'Error: ' + e.message; });
+</script>
