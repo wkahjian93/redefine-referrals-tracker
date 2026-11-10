@@ -55,7 +55,7 @@ function seed() {
 }
 seed();
 
-const types = {'.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.pdf': 'application/pdf'};
+const types = {'.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.pdf': 'application/pdf'};
 const SAVE_OK = {'sample-page.jpg': FIX, 'sample-reply.json': FIX, 'icon-192.png': path.join(DOCS, 'icons'), 'icon-512.png': path.join(DOCS, 'icons'), 'apple-touch-icon.png': path.join(DOCS, 'icons')};
 http.createServer((req, res) => {
   const url = decodeURIComponent(req.url.split('?')[0]);

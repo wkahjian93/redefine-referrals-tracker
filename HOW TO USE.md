@@ -70,5 +70,5 @@
 ## Good to know
 - **Alerts:** pop-up + sound + red badge while the app is open. In **Me → Phone pop-up alerts → Turn on**, it also alerts while the app is in the background (Android; iPhone only after Add to Home Screen). Alerts when the app is fully closed are not built yet.
 - **WhatsApp:** WhatsApp doesn't allow an app to post into a group by itself. The button prepares the message and you choose the group. Shared messages never include client names or numbers.
-- **Music** is gentle generated background music. Turn it off with ♪.
+- **Music:** the team song "转介绍" plays when the app opens (phones start it on your first tap). Turn it off with ♪ at the top or in Me; it stays off until you turn it back on.
 - If the AI can't read a photo, you can **Try again** or **Type the names myself** (then you must cover the private details by dragging).

@@ -9,7 +9,7 @@
     del: function (k) { try { localStorage.removeItem('rrt.' + k); } catch (e) {} }
   };
   var S = {auth: LS.get('auth', null), data: null, ver: 0, seen: LS.get('seen', {}), unread: {feed: 0, chat: 0},
-    music: LS.get('music', false), sounds: LS.get('sounds', true), photos: {}, period: 'month', draft: null, polling: null};
+    music: LS.get('musicOn', true), /* team song plays by default; only a manual "off" is remembered */ sounds: LS.get('sounds', true), photos: {}, period: 'month', draft: null, polling: null};
 
   var ERR = {
     wrong_code: 'That team code is not right. Ask your leader for it.', wrong_pin: 'Wrong PIN for this name.', pin_4_digits: 'PIN must be 4 to 6 digits.',
@@ -193,9 +193,13 @@
   function wireShell() {
     document.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { location.hash = '#/' + b.dataset.go; }; });
     var m = document.getElementById('music');
-    if (m) m.onclick = function () { S.music = !S.music; LS.set('music', S.music); if (S.music) SOUND.startMusic(); else SOUND.stopMusic(); m.classList.toggle('on', S.music); };
+    if (m) m.onclick = function () { S.music = !S.music; LS.set('musicOn', S.music); if (S.music) SOUND.startMusic(); else SOUND.stopMusic(); m.classList.toggle('on', S.music); };
   }
-  document.addEventListener('pointerdown', function () { SOUND.unlock(); if (S.music && !SOUND.isPlaying()) SOUND.startMusic(); }, {passive: true});
+  // phones block sound until the first touch: start the song on the first tap/click/key if it could not start by itself
+  ['pointerdown', 'touchend', 'click', 'keydown'].forEach(function (ev) {
+    document.addEventListener(ev, function () { SOUND.unlock(); if (S.music && !SOUND.isPlaying()) SOUND.startMusic(); }, {passive: true});
+  });
+  if (S.music) SOUND.startMusic();   // plays straight away where the browser allows it
 
   /* ---------- sign in ---------- */
   function renderSignIn() {
@@ -781,7 +785,7 @@
       '<div class="tiles" style="margin:12px 0 0"><div class="tile"><div class="k">This month</div><div class="v">' + month.length + '</div></div><a class="tile" href="#/bonus" style="text-decoration:none;color:inherit"><div class="k">Bonus this month</div><div class="v">RM' + bonus.total + '</div><div class="s">approved so far ›</div></a></div>' +
       '<a class="btn block" href="#/leads" style="margin-top:10px">📋 My leads' + (open ? ' · ' + open + ' to follow up' : '') + '</a></div>';
     html += '<div class="card"><h2>Settings</h2>' +
-      '<label class="check"><input type="checkbox" id="me-music"' + (S.music ? ' checked' : '') + '><span>Background music ♪</span></label>' +
+      '<label class="check"><input type="checkbox" id="me-music"' + (S.music ? ' checked' : '') + '><span>Team song ♪ (转介绍) · plays when the app opens</span></label>' +
       '<label class="check"><input type="checkbox" id="me-sound"' + (S.sounds ? ' checked' : '') + '><span>Sound for new messages and referrals</span></label>' +
       '<div class="row" style="padding:8px 0"><div class="grow">Phone pop-up alerts<div class="faint">' + (notif || 'Shows alerts while the app is open in the background') + '</div></div>' + (!notif ? '<button class="btn sm" id="me-notif">Turn on</button>' : '') + '</div>' +
       '<div class="faint">Tip: install the app. iPhone: Safari → Share → Add to Home Screen. Android: Chrome menu → Add to Home screen.</div></div>';
@@ -797,7 +801,7 @@
   viewMe.wire = function (root) {
     var q = function (s) { return root.querySelector(s); };
     q('#me-out').onclick = function () { confirmBox('Sign out?', 'You will need the team code and your PIN to come back.', 'Sign out').then(function (y) { if (y) signOut(); }); };
-    q('#me-music').onchange = function (e) { S.music = e.target.checked; LS.set('music', S.music); if (S.music) SOUND.startMusic(); else SOUND.stopMusic(); render(); };
+    q('#me-music').onchange = function (e) { S.music = e.target.checked; LS.set('musicOn', S.music); if (S.music) SOUND.startMusic(); else SOUND.stopMusic(); render(); };
     q('#me-sound').onchange = function (e) { S.sounds = e.target.checked; LS.set('sounds', S.sounds); if (S.sounds) SOUND.ding(); };
     if (q('#me-notif')) q('#me-notif').onclick = function () { Notification.requestPermission().then(function () { render(); startPolling(); }); };
     if (q('#me-rate-save')) q('#me-rate-save').onclick = function () {
