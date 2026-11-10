@@ -11,7 +11,8 @@ var CORE = (function () {
     refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt'],
     comments: ['id', 'postId', 'agentId', 'text', 'created'],
     settings: ['key', 'value'],
-    log: ['at', 'by', 'action', 'detail']
+    log: ['at', 'by', 'action', 'detail'],
+    sessions: ['token', 'agentId', 'created', 'lastSeen', 'device']
   };
   var KEEP_DAYS = 90;                    // client details are wiped after this; the name stays
   var SHOW_DAYS = 400;                   // how far back the app loads posts and chat
@@ -43,11 +44,11 @@ var CORE = (function () {
   }
 
   /* ---------- who is asking ---------- */
-  function signIn(q, store) {
+  function signIn(q, store, quiet) {
     var code = str(q.code, 100), name = str(q.name, 40).replace(/\s+/g, ' '), pin = str(q.pin, 12);
     var team = store.prop('TEAM_CODE'), leader = store.prop('LEADER_CODE');
     if (!team || team.length < 6) fail('server_not_set_up');
-    if (store.fails() >= 8) fail('too_many_tries');
+    if (!quiet && store.fails() >= 8) fail('too_many_tries');
     var role = leader && leader.length >= 10 && code === leader ? 'leader' : code === team ? 'agent' : '';
     if (!role) { store.fails(1); fail('wrong_code'); }
     if (name.length < 2) fail('name_needed');
@@ -68,8 +69,35 @@ var CORE = (function () {
     return {me: me, role: role, created: true};
   }
 
-  /* every call except sign-in carries {code, name, pin} saved on the phone */
-  function who(q, store) { var r = signIn({code: q.code, name: q.name, pin: q.pin}, store); return {me: r.me, leader: r.role === 'leader'}; }
+  /* Device sign-in, like WhatsApp: signing in once gives the phone a long random key. Only its hash is stored.
+     The key keeps working even if the team code changes; it stops only when the member signs out on that phone
+     or the leader removes the member. */
+  function newSession(store, me, device) {
+    var token = newId(store, 40), rows = store.load('sessions'), now = nowIso(store);
+    rows.push({token: store.hash('sess|' + token), agentId: me.id, created: now, lastSeen: now, device: str(device, 60)});
+    store.save('sessions', rows);
+    return token;
+  }
+  function who(q, store) {
+    if (q.token) {
+      var h = store.hash('sess|' + str(q.token, 80)), rows = store.load('sessions'), s = rows.filter(function (x) { return x.token === h; })[0];
+      if (!s) fail('signed_out');
+      var me = store.load('agents').filter(function (a) { return a.id === s.agentId; })[0];
+      if (!me || String(me.active) === 'false') fail('removed');
+      var today = myt(nowIso(store)).slice(0, 10);
+      if (String(s.lastSeen).slice(0, 10) !== today) { s.lastSeen = nowIso(store); store.save('sessions', rows); }   // at most one write a day
+      return {me: me, leader: me.role === 'leader'};
+    }
+    // phones from before device keys: code + name + PIN (no shared lock-out counter here)
+    var r = signIn({code: q.code, name: q.name, pin: q.pin}, store, true);
+    return {me: r.me, leader: r.role === 'leader'};
+  }
+  function signOut(q, store, me) {
+    if (!q.token) return {signedOut: true};
+    var h = store.hash('sess|' + str(q.token, 80));
+    store.save('sessions', store.load('sessions').filter(function (x) { return x.token !== h; }));
+    return {signedOut: true};
+  }
 
   /* ---------- AI reading of a referral page ---------- */
   var READ_PROMPT = [
@@ -392,6 +420,7 @@ var CORE = (function () {
     var agents = store.load('agents'), a = agents.filter(function (x) { return x.id === q.agentId; })[0];
     if (!a) fail('not_found'); if (a.id === me.id) fail('cannot_remove_self');
     a.active = 'false'; store.save('agents', agents); store.version(true);
+    store.save('sessions', store.load('sessions').filter(function (x) { return x.agentId !== a.id; }));   // signs them out on every phone
     log(store, me.id, 'remove_agent', a.name);
     return {ok: true};
   }
@@ -412,12 +441,12 @@ var CORE = (function () {
     return {wiped: n, photos: ph};
   }
 
-  var OPS = {step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
+  var OPS = {signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
 
   function handle(q, store) {
     if (!q || typeof q !== 'object') fail('bad_request');
     if (q.op === 'signin') {
-      return store.withLock(function () { var r = signIn(q, store); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.role === 'leader'}, created: !!r.created}; });
+      return store.withLock(function () { var r = signIn(q, store); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.role === 'leader'}, created: !!r.created, token: newSession(store, r.me, q.device)}; });
     }
     if (q.op === 'read') {   // count the reading under the lock, but call the AI outside it (it can take 20 s)
       if (!b64ok(q.image, MAX_READ_B64)) fail('bad_photo');

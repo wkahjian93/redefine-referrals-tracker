@@ -105,14 +105,24 @@
   function refresh(silent) {
     return api('sync', {ver: S.ver}).then(function (d) {
       if (d.same) return false;
-      var first = !S.data; S.data = d; S.ver = d.ver;
+      var first = !S.data; S.data = d; S.ver = d.ver; S.offline = false;
+      saveCache();
       announce(first);
       return true;
     }).catch(function (e) {
-      if (/wrong_pin|wrong_code|removed/.test(e.message)) { signOut(); return false; }
-      if (!silent) toast('Could not refresh', errText(e)); return false;
+      // stay signed in like WhatsApp: only a sign-out on this phone or removal by the leader ends it
+      if (/^(signed_out|removed)$/.test(e.message)) { signOut(true, e.message); return false; }
+      if (e.message === 'network' && S.data && !S.offline) { S.offline = true; render(); }
+      if (!silent && S.data) toast('Could not refresh', errText(e)); return false;
     });
   }
+  /* last data kept on the phone, so the app opens instantly and works without signal (read only) */
+  function saveCache() { try { localStorage.setItem('rrt.cache', JSON.stringify({who: S.auth && S.auth.name, data: S.data})); } catch (e) {} }
+  function loadCache() {
+    try { var c = JSON.parse(localStorage.getItem('rrt.cache') || 'null'); if (c && S.auth && c.who === S.auth.name && c.data) { S.data = c.data; S.ver = c.data.ver; } } catch (e) {}
+  }
+  function deviceName() { var u = navigator.userAgent; return /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac/.test(u) ? 'Mac' : 'Phone'; }
+  function keepStorage() { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {} }
   function announce(first) {
     var me = S.data.me.id, lastP = S.seen.p || '', lastC = S.seen.c || '', lastT = S.seen.t || '', lastS = S.seen.s || '';
     var maxStep = S.data.refs.reduce(function (m, r) { return [r.apptAt || '', r.closeAt || '', m].sort().pop(); }, '');
@@ -174,6 +184,7 @@
     var views = {feed: viewFeed, post: viewPost, board: viewBoard, snap: viewSnap, chat: viewChat, me: viewMe, review: viewReview, leads: viewLeads, steps: viewSteps, bonus: viewBonus};
     var body = (views[v] || viewFeed)();
     $app.innerHTML = (CFG.sample ? '<div class="sample-bar">' + esc(CFG.sample) + '</div>' : '') +
+      (S.offline ? '<div class="sample-bar" style="background:#6B6A66;color:#fff">No signal · showing what was saved on this phone</div>' : '') +
       '<header class="top"><div class="wrap"><div class="brand"><img src="icons/icon-192.png" alt=""><div><b>REDEFINE <span>Referrals</span></b><small>' + esc(teamMonthTotal()) + ' team referrals this month</small></div></div>' +
       '<button class="icon-btn' + (S.music ? ' on' : '') + '" id="music" aria-label="Background music" title="Background music">♪</button></div></header>' +
       '<main><div class="wrap" id="view"></div></main>' + tabsHtml();
@@ -217,8 +228,10 @@
     var q = {code: document.getElementById('si-code').value.trim(), name: document.getElementById('si-name').value.trim(), pin: document.getElementById('si-pin').value.trim(), create: create};
     var err = document.getElementById('si-err'), btn = document.getElementById('si-go');
     err.textContent = ''; btn.disabled = true; btn.textContent = 'Checking…';
+    q.device = deviceName();
     api('signin', q).then(function (r) {
-      S.auth = {code: q.code, name: r.me.name, pin: q.pin}; LS.set('auth', S.auth); LS.set('lastName', r.me.name);
+      S.auth = {token: r.token, name: r.me.name}; LS.set('auth', S.auth); LS.set('lastName', r.me.name);   // the phone keeps only its device key, not the code or PIN
+      keepStorage();
       if (r.created) toast('Welcome to the team board', 'Snap your first referral page to get on the board!');
       S.data = null; render(); return refresh().then(function () { startPolling(); route(); });
     }).catch(function (e) {
@@ -230,7 +243,12 @@
       err.textContent = errText(e);
     });
   }
-  function signOut() { S.auth = null; S.data = null; S.ver = 0; LS.del('auth'); clearInterval(S.polling); render(); }
+  function signOut(auto, reason) {
+    if (!auto && S.auth && S.auth.token) api('signout', {}).catch(function () {});   // ends this phone's key on the server too
+    S.auth = null; S.data = null; S.ver = 0; LS.del('auth'); try { localStorage.removeItem('rrt.cache'); } catch (e) {}
+    clearInterval(S.polling); render();
+    if (auto) { var el = document.getElementById('si-err'); if (el) el.textContent = reason === 'removed' ? 'Your leader removed this name from the team.' : 'You were signed out on this phone. Please sign in again.'; }
+  }
 
   /* ---------- feed ---------- */
   function refsOf(postId) { return S.data.refs.filter(function (r) { return r.postId === postId; }); }
@@ -781,7 +799,7 @@
     var bonus = CORE.bonusTable(S.data.agents, S.data.posts, S.data.refs, mk, S.data.rates).filter(function (x) { return x.id === me.id; })[0] || {total: 0};
     var open = myOpenLeads().length, R = S.data.rates;
     var notif = !('Notification' in window) ? 'Not supported here. On iPhone: Share → Add to Home Screen first.' : Notification.permission === 'granted' ? 'On' : Notification.permission === 'denied' ? 'Blocked in phone settings' : '';
-    var html = '<div class="card"><div class="row">' + avatar(me.id) + '<div class="grow"><div class="name">' + esc(me.name) + '</div><div class="faint">' + (me.leader ? 'Leader' : 'Agent') + ' · REDEFINE</div></div><button class="btn sm" id="me-out">Sign out</button></div>' +
+    var html = '<div class="card"><div class="row">' + avatar(me.id) + '<div class="grow"><div class="name">' + esc(me.name) + '</div><div class="faint">' + (me.leader ? 'Leader' : 'Agent') + ' · REDEFINE</div><div class="faint">🔒 Stays signed in on this phone</div></div></div>' +
       '<div class="tiles" style="margin:12px 0 0"><div class="tile"><div class="k">This month</div><div class="v">' + month.length + '</div></div><a class="tile" href="#/bonus" style="text-decoration:none;color:inherit"><div class="k">Bonus this month</div><div class="v">RM' + bonus.total + '</div><div class="s">approved so far ›</div></a></div>' +
       '<a class="btn block" href="#/leads" style="margin-top:10px">📋 My leads' + (open ? ' · ' + open + ' to follow up' : '') + '</a></div>';
     html += '<div class="card"><h2>Settings</h2>' +
@@ -795,12 +813,15 @@
         '</div><button class="btn sm primary" id="me-rate-save">Save rates</button><span class="faint"> Approach is counted, not paid.</span>' +
         '<h3 style="margin-top:16px">Team members (' + S.data.agents.length + ')</h3>' + S.data.agents.map(function (a) { return '<div class="row" style="padding:5px 0">' + avatar(a.id, true) + '<div class="grow">' + esc(a.name) + (a.role === 'leader' ? ' <span class="faint">leader</span>' : '') + '</div>' + (a.id !== me.id ? '<button class="btn sm danger" data-rm="' + a.id + '">Remove</button>' : '') + '</div>'; }).join('') + '</div>';
     }
-    html += '<div class="card"><h2>Privacy rules</h2><ul class="steps muted"><li>📷 The original photo is read once by AI and never saved. Only the covered photo is kept.</li><li>👀 Team sees: agent name, client names, count, covered photo, comments.</li><li>🔒 Only the agent and leader see age, phone, gender and remarks.</li><li>🗑 After 3 months, phone, age, gender, remarks, the referrer\'s name and the photo are deleted automatically. The referred names stay.</li><li>📤 WhatsApp shares never include client names or numbers.</li></ul></div>';
+    html += '<div class="card"><h2>Privacy rules</h2><ul class="steps muted"><li>📷 The original photo is read once by AI and never saved. Only the covered photo is kept.</li><li>👀 Team sees: agent name, client names, count, covered photo, comments.</li><li>🔒 Only the agent and leader see age, phone, gender and remarks.</li><li>🗑 After 3 months, phone, age, gender, remarks, the referrer\'s name and the photo are deleted automatically. The referred names stay.</li><li>📤 WhatsApp shares never include client names or numbers.</li></ul></div>' +
+      '<div style="text-align:center;margin:26px 0 8px"><button id="me-out" style="background:none;border:0;color:var(--faint);font-size:12.5px;text-decoration:underline">Sign out of this phone</button></div>';
     return html;
   }
   viewMe.wire = function (root) {
     var q = function (s) { return root.querySelector(s); };
-    q('#me-out').onclick = function () { confirmBox('Sign out?', 'You will need the team code and your PIN to come back.', 'Sign out').then(function (y) { if (y) signOut(); }); };
+    q('#me-out').onclick = function () {
+      confirmBox('Sign out of this phone?', 'You normally never need to. The app stays signed in like WhatsApp.<br>To come back you will need the <b>team code</b> and <b>your PIN</b>.', 'Sign out', true).then(function (y) { if (y) signOut(); });
+    };
     q('#me-music').onchange = function (e) { S.music = e.target.checked; LS.set('musicOn', S.music); if (S.music) SOUND.startMusic(); else SOUND.stopMusic(); render(); };
     q('#me-sound').onchange = function (e) { S.sounds = e.target.checked; LS.set('sounds', S.sounds); if (S.sounds) SOUND.ding(); };
     if (q('#me-notif')) q('#me-notif').onclick = function () { Notification.requestPermission().then(function () { render(); startPolling(); }); };
@@ -822,5 +843,14 @@
 
   /* ---------- start ---------- */
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});
-  if (S.auth) { render(); refresh().then(function () { startPolling(); route(); }); } else route();
+  function start() {
+    keepStorage(); loadCache();
+    if (S.data) route(); else render();   // open instantly with what was saved on this phone
+    refresh(!!S.data).then(function () { startPolling(); route(); });
+  }
+  if (S.auth && !S.auth.token && S.auth.code) {   // phone signed in before device keys: switch it over quietly
+    render();
+    api('upgrade', {device: deviceName()}).then(function (r) { S.auth = {token: r.token, name: S.auth.name}; LS.set('auth', S.auth); start(); })
+      .catch(function (e) { if (/^(wrong_pin|wrong_code|removed|signed_out)$/.test(e.message)) signOut(true, e.message); else start(); });
+  } else if (S.auth) start(); else route();
 })();

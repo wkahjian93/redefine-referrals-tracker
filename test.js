@@ -21,6 +21,29 @@ ok(call(Object.assign({op: 'signin'}, gm)).me.leader === true, 'leader code give
 ok(call(Object.assign({op: 'signin'}, ali)).me.leader === false, 'team code gives agent');
 ok(!s.tables.agents.some(a => a.pin === '1234'), 'PIN stored only as a hash');
 
+// stay signed in like WhatsApp: device key
+const tokA = call(Object.assign({op: 'signin', device: 'iPhone'}, ali)).token;
+ok(tokA && tokA.length === 40, 'sign-in gives the phone a device key');
+ok(!s.tables.sessions.some(x => x.token === tokA), 'only the hash of the key is stored');
+const T = {token: tokA};
+ok(call(Object.assign({op: 'sync'}, T)).me.name === 'Ali Tan', 'device key alone works (no code/PIN needed)');
+s.props.TEAM_CODE = 'new-team-code';
+ok(call(Object.assign({op: 'sync'}, T)).ok, 'changing the team code does NOT sign anyone out');
+s.props.TEAM_CODE = 'test-team';
+for (let i = 0; i < 9; i++) { try { call({op: 'signin', code: 'test-team', name: 'Ali Tan', pin: '0000'}); } catch (e) {} }
+ok(call(Object.assign({op: 'sync'}, T)).ok, '8+ wrong PINs by someone else do not lock signed-in phones');
+s.resetFails();
+err(() => call({op: 'sync', token: 'x'.repeat(40)}), 'signed_out', 'unknown key refused');
+const tokGm = call(Object.assign({op: 'signin'}, gm)).token;
+ok(call({op: 'sync', token: tokGm}).me.leader === true, 'leader key keeps leader rights');
+const tokMei2 = call(Object.assign({op: 'signin'}, mei)).token, tokMei3 = call(Object.assign({op: 'signin'}, mei)).token;
+call({op: 'signout', token: tokMei2});
+err(() => call({op: 'sync', token: tokMei2}), 'signed_out', 'sign out ends that phone only');
+ok(call({op: 'sync', token: tokMei3}).ok, 'other phones of the same member stay signed in');
+const legacyTok = call(Object.assign({op: 'upgrade'}, mei)).token;
+ok(call({op: 'sync', token: legacyTok}).ok, 'older phones (code + PIN) can switch to a device key');
+ok(!JSON.stringify(call({op: 'sync', token: tokGm})).includes(s.tables.sessions[0].token), 'device keys never sent back in sync');
+
 // AI reading cleans messy replies safely
 const r = CORE.parseRead('```json\n{"giver":"Tan Ah Kow","rows":[{"name":"Lim Wei"},{"name":""},{"name":"Ch?n","phone":"012-3456789"}],"private":[{"type":"phone","x":0.5,"y":-1,"w":3,"h":0.05},{"x":0.1,"y":0.1,"w":0,"h":0}],"faces":"x"}\n```');
 ok(r.rows.length === 2, 'empty-name rows dropped, nothing invented');
@@ -111,6 +134,11 @@ ok(call(Object.assign({op: 'sync'}, ali)).paid[month].mine === 27 && call(Object
 const before = s.tables.posts.length;
 call(Object.assign({op: 'post', photo: PHOTO, covered: true, rows: ['Aa Bb', 'Cc Dd', 'Ee Ff', 'Gg Hh'].map(name => ({name}))}, mei));
 ok(s.tables.posts.slice(before).some(p => p.kind === 'milestone' && /5 referrals/.test(p.text)), 'milestone card at 5 this month');
+
+// leader removes a member -> their phones are signed out
+const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');
+call(Object.assign({op: 'removeAgent', agentId: meiAgent.id, confirm: true}, gm));
+err(() => call({op: 'sync', token: tokMei3}), 'signed_out', 'removed member is signed out on every phone');
 
 // 3-month auto-delete keeps only the name
 s.setNow('2027-02-09T03:00:00Z');   // 91 days later

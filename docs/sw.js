@@ -1,5 +1,5 @@
 // Network first and always revalidated, so phones get updates as soon as they are online; falls back to the cache offline.
-const CACHE = 'referrals-v3';
+const CACHE = 'referrals-v4';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'sound.js', 'redact.js', 'core.js', 'config.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); });
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
