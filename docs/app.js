@@ -8,7 +8,7 @@
     set: function (k, v) { try { localStorage.setItem('rrt.' + k, JSON.stringify(v)); } catch (e) {} },
     del: function (k) { try { localStorage.removeItem('rrt.' + k); } catch (e) {} }
   };
-  var S = {auth: LS.get('auth', null), data: null, ver: 0, seen: LS.get('seen', {}), unread: {feed: 0, chat: 0},
+  var S = {auth: LS.get('auth', null), data: null, ver: 0, seen: LS.get('seen', {}), unread: {feed: 0},
     music: LS.get('musicOn', true), /* team song plays by default; only a manual "off" is remembered */ sounds: LS.get('sounds', true), photos: {}, period: 'month', draft: null, polling: null};
 
   var ERR = {
@@ -214,14 +214,12 @@
     if (!lastS) lastS = '9';   // first run on this phone: nothing is "new"
     var newPosts = S.data.posts.filter(function (p) { return p.created > lastP && p.agentId !== me && p.kind !== 'approach'; });
     var newCmts = S.data.comments.filter(function (c) { return c.postId !== 'team' && c.created > lastC && c.agentId !== me; });
-    var newChat = S.data.comments.filter(function (c) { return c.postId === 'team' && c.created > lastT && c.agentId !== me; });
     if (!S.seen.p) { mark(); dailyReminderPopups(); return; }   // first time on this phone: nothing is "new"
-    S.unread.feed = newPosts.length + newCmts.length; S.unread.chat = newChat.length;
+    S.unread.feed = newPosts.length + newCmts.length;
     if (!first) {
       var alerts = [];
       newPosts.forEach(function (p) { var n = agent(p.agentId).name; alerts.push([p.kind === 'milestone' ? '🏆 Milestone' : 'New referral update', p.kind === 'milestone' ? p.text : n + ' collected ' + p.count + ' referral' + (p.count === 1 ? '' : 's') + '!', p.agentId, '#/post/' + p.id]); });
       newCmts.forEach(function (c) { alerts.push([agent(c.agentId).name + ' commented', c.text, c.agentId, c.postId === 'board' ? '#/board' : '#/post/' + c.postId]); });
-      newChat.forEach(function (c) { alerts.push([agent(c.agentId).name + ' · Team chat', c.text, c.agentId, '#/chat']); });
       if (S.data.me.leader) S.data.refs.forEach(function (r) {   // leader: new appointment / close updates to approve
         if (r.agentId === me) return;
         if (r.appt === 'pending' && r.apptAt > lastS) alerts.push([agent(r.agentId).name + ' · appointment done', 'Met ' + r.name + '. Tap to approve.', r.agentId, '#/steps']);
@@ -232,14 +230,12 @@
     }
     dailyReminderPopups();
     route.current === 'feed' || route.current === 'post' ? mark('feed') : null;
-    route.current === 'chat' ? mark('chat') : null;
     render();
   }
   function mark(which) {
     if (!S.data) return;
     var max = function (list) { return list.reduce(function (m, x) { return x.created > m ? x.created : m; }, ''); };
     if (!which || which === 'feed') { S.seen.p = max(S.data.posts) || S.seen.p || '0'; S.seen.c = max(S.data.comments.filter(function (c) { return c.postId !== 'team'; })) || S.seen.c || '0'; S.unread.feed = 0; }
-    if (!which || which === 'chat') { S.seen.t = max(S.data.comments.filter(function (c) { return c.postId === 'team'; })) || S.seen.t || '0'; S.unread.chat = 0; }
     LS.set('seen', S.seen);
   }
   function startPolling() {
@@ -254,9 +250,8 @@
     route.current = p[0] || 'feed'; route.arg = p[1] || '';
     if (!route.keepModal) document.getElementById('modal-root').innerHTML = ''; route.keepModal = false;
     if (route.current === 'feed' || route.current === 'post') mark('feed');
-    if (route.current === 'chat') mark('chat');
-    render(); window.scrollTo(0, route.current === 'chat' ? document.body.scrollHeight : 0);
-    if (route.current === 'chat') setTimeout(function () { window.scrollTo(0, document.body.scrollHeight); }, 50);
+    if (route.current === 'chat') { location.replace('#/feed'); return; }   // team chat was removed (2026-11-12)
+    render(); window.scrollTo(0, 0);
   }
   window.addEventListener('hashchange', route);
 
@@ -265,7 +260,7 @@
     if (!S.auth) return renderSignIn();
     if (!S.data) { $app.innerHTML = '<div class="signin"><div class="box" style="text-align:center"><img class="logo" src="icons/icon-192.png" alt=""><div class="spinner"></div><p>Loading your team…</p></div></div>'; return; }
     var v = route.current, sc = window.scrollY;
-    var views = {feed: viewFeed, post: viewPost, board: viewBoard, snap: viewSnap, chat: viewChat, me: viewMe, review: viewReview, leads: viewLeads, steps: viewSteps, bonus: viewBonus};
+    var views = {feed: viewFeed, post: viewPost, board: viewBoard, snap: viewSnap, me: viewMe, review: viewReview, leads: viewLeads, steps: viewSteps, bonus: viewBonus};
     var body = (views[v] || viewFeed)();
     $app.innerHTML = (CFG.sample ? '<div class="sample-bar">' + esc(CFG.sample) + '</div>' : '') +
       (S.offline ? '<div class="sample-bar" style="background:#6B6A66;color:#fff">No signal · showing what was saved on this phone</div>' : '') +
@@ -279,8 +274,8 @@
     if (v === S.lastView) window.scrollTo(0, sc); S.lastView = v;
   }
   function tabsHtml() {
-    var t = [['feed', '🏠', 'Feed', S.unread.feed], ['board', '📊', 'Board', 0], ['snap', '📷', 'Snap', 0], ['chat', '💬', 'Chat', S.unread.chat], ['me', '👤', 'Me', 0]];
-    var cur = {post: 'feed', review: 'board', steps: 'board', bonus: 'board', leads: 'me'}[route.current] || route.current;
+    var t = [['feed', '🏠', 'Feed', S.unread.feed], ['board', '📊', 'Board', 0], ['snap', '📷', 'Snap', 0], ['leads', '📋', 'Leads', S.data && S.data.me ? myToCall().length : 0], ['me', '👤', 'Me', 0]];
+    var cur = {post: 'feed', review: 'board', steps: 'board', bonus: 'board'}[route.current] || route.current;
     return '<nav class="tabs"><div class="wrap">' + t.map(function (x) {
       return '<button class="tab' + (x[0] === 'snap' ? ' snap' : '') + (cur === x[0] ? ' active' : '') + '" data-go="' + x[0] + '"><i>' + x[1] + '</i>' + x[2] + (x[3] ? '<span class="badge">' + (x[3] > 99 ? '99+' : x[3]) + '</span>' : '') + '</button>';
     }).join('') + '</div></nav>';
@@ -392,7 +387,6 @@
   }
   function sendComment(postId, text) {
     return api('comment', {postId: postId, text: text}).then(function () { return refresh(true); }).then(function () {
-      if (postId === 'team') setTimeout(function () { window.scrollTo(0, document.body.scrollHeight); }, 30);
     }).catch(function (e) { toast('Not sent', errText(e)); });
   }
   function viewFeed() {
@@ -744,7 +738,7 @@
     var needClose = all.filter(function (r) { return r.status !== 'rejected' && (r.appt === 'pending' || r.appt === 'approved') && (!r.close || r.close === 'rejected'); });
     var done = all.filter(function (r) { return r.close === 'pending' || r.close === 'approved' || r.status === 'rejected'; });
     var sec = function (t, sub, list, hot) { return list.length ? '<div class="card"' + (hot ? ' style="border-color:var(--gold)"' : '') + '><h2>' + t + ' (' + list.length + ')</h2><div class="faint">' + sub + '</div>' + list.slice(0, 60).map(leadRow).join('') + '</div>' : ''; };
-    return '<div style="margin-bottom:10px"><a href="#/me">← Me</a></div>' + remindersHtml() +
+    return remindersHtml() +
       (all.length ? '' : '<div class="empty">No leads yet. Snap a referral page first.</div>') +
       sec('📞 Call these first', 'Call within ' + ((S.data && S.data.callDays) || 14) + ' days of posting, or the RM' + S.data.rates.lead + ' lead bonus is forfeited. Tap 📞 Called after each call.', toCall, true) +
       sec('Waiting for an appointment', 'Met them? Tap ☕ (RM ' + S.data.rates.appt + ').', needAppt) +
@@ -896,22 +890,6 @@
     });
     if (any) LS.set('remShown', shown);
   }
-
-  /* ---------- team chat ---------- */
-  function viewChat() {
-    var me = S.data.me.id, list = cmtsOf('team'), out = '', lastDay = '';
-    list.slice(-200).forEach(function (c) {
-      var dl = dayLabel(c.created); if (dl !== lastDay) { out += '<div class="chat-day">' + dl + '</div>'; lastDay = dl; }
-      out += '<div class="msg' + (c.agentId === me ? ' me' : '') + '">' + (c.agentId === me ? '' : '<div class="who" style="color:' + avColor(c.agentId) + '">' + esc(agent(c.agentId).name) + '</div>') + esc(c.text) + '<div class="t">' + hhmm(c.created) + '</div></div>';
-    });
-    return '<div class="chat">' + (out || '<div class="empty">Team chat. Say hi, share tips, ask for help.</div>') + '</div>' +
-      '<div class="composer"><div class="wrap"><input id="ch-in" placeholder="Message the team" maxlength="1000"><button class="btn primary" id="ch-send">Send</button></div></div>';
-  }
-  viewChat.wire = function (root) {
-    var inp = document.getElementById('ch-in'), b = document.getElementById('ch-send');
-    var send = function () { var t = inp.value.trim(); if (!t) return; b.disabled = true; inp.value = ''; sendComment('team', t).finally(function () { b.disabled = false; var i = document.getElementById('ch-in'); if (i) i.focus(); }); };
-    b.onclick = send; inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') send(); });
-  };
 
   /* ---------- me ---------- */
   function viewMe() {

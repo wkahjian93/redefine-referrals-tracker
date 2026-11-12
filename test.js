@@ -80,9 +80,10 @@ ok(seenByGm.refs.find(x => x.name === 'Chong Mei Yee').phone, 'leader sees conta
 ok(call(Object.assign({op: 'sync', ver: seenByGm.ver}, gm)).same, 'no change -> tiny reply');
 ok(!JSON.stringify(seenByMei).includes('"pin"'), 'PIN hash never sent');
 
-// comments & chat
+// comments (team chat removed)
 ok(call(Object.assign({op: 'comment', postId: p1.post.id, text: 'Well done bro!'}, mei)).ok, 'comment on post');
-ok(call(Object.assign({op: 'comment', postId: 'team', text: 'Who is free for coffee?'}, ali)).ok, 'team chat');
+err(() => call(Object.assign({op: 'comment', postId: 'team', text: 'Who is free for coffee?'}, ali)), 'chat_removed', 'team chat is removed');
+ok(call(Object.assign({op: 'comment', postId: 'board', text: 'Great week team'}, ali)).ok, 'Board talk still works');
 err(() => call(Object.assign({op: 'comment', postId: 'zzz', text: 'hi'}, ali)), 'not_found', 'comment on missing post refused');
 
 // leader approval

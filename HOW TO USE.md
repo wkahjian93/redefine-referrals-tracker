@@ -20,7 +20,7 @@
 
 **Asked but got no names?** Snap → **🙋 I asked a client but got no names**. It counts as an *Approach* (effort, not paid).
 
-**After the referral (this is where the bigger bonus is):** Me → **📋 My leads**.
+**After the referral (this is where the bigger bonus is):** the **📋 Leads** tab (bottom bar).
 - Met the person? Tap **☕ Appointment done** (RM5 after leader approval).
 - Closed a case? Tap **🎯 Closed case** (RM20 after leader approval). You need the appointment marked first.
 - Tapped by mistake? Tap **undo** (only while it's still waiting approval).
@@ -34,9 +34,9 @@
 - 💰 early in the month: last month's bonus amount and whether it's paid
 
 **Other tabs**
+- **📋 Leads:** your names to call (red badge = still to call), appointments and closes.
 - **🏠 Feed:** everyone's referral updates. Comment to cheer each other on.
 - **📊 Board:** leaderboard, weekly trend and team numbers (the data analysis). "Board talk" is for comments on the team's effort.
-- **💬 Chat:** team chat. Pop-ups and a sound arrive when someone posts or messages.
 - **👤 Me:** your totals, background music ♪, sounds, phone alerts.
 
 **What your teammates can and can't see**

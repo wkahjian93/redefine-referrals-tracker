@@ -18,7 +18,7 @@ var CORE = (function () {
   var CALL_DAYS = 14;                   // a lead must be called within 14 days of posting, or its lead bonus is forfeited
   var CALL_REMIND_DAYS = 7;             // from day 7 the agent gets a daily lock-screen reminder to call
   var KEEP_DAYS = 90;                    // client details are wiped after this; the name stays
-  var SHOW_DAYS = 400;                   // how far back the app loads posts and chat
+  var SHOW_DAYS = 400;                   // how far back the app loads posts and comments
   var MAX_PHOTO_B64 = 2.5 * 1024 * 1024; // redacted photo, about 1.8 MB
   var MAX_READ_B64 = 4 * 1024 * 1024;
   var MAX_ROWS = 20;
@@ -262,7 +262,8 @@ var CORE = (function () {
   function comment(q, store, me) {
     var text = str(q.text, 1000), target = str(q.postId, 20);
     if (!text) fail('empty');
-    if (target !== 'team' && target !== 'board' && !store.load('posts').some(function (p) { return p.id === target; })) fail('not_found');
+    if (target === 'team') fail('chat_removed');   // team chat was removed; comments on posts and Board talk stay
+    if (target !== 'board' && !store.load('posts').some(function (p) { return p.id === target; })) fail('not_found');
     var c = store.load('comments'), row = {id: newId(store, 10), postId: target, agentId: me.id, text: text, created: nowIso(store)};
     c.push(row); store.save('comments', c); store.version(true);
     return {comment: row};
