@@ -39,10 +39,13 @@ function seed() {
   comments.push({id: 'cx', postId: lastPost.id, agentId: 'a2', text: 'Well done! 👏', created: iso(Date.parse(lastPost.created) + 600e3)});
   store.save('agents', agents); store.save('comments', comments);
   // follow-up steps: some leads met, some closed; recent ones still waiting approval
+  refs.forEach(r => {   // most leads get called within a few days; a few are left uncalled to show reminders / forfeits
+    if (r.status !== 'rejected' && rnd() < 0.7) { const c = Date.parse(r.created) + (0.5 + rnd() * 5) * 864e5; if (c < now) { r.called = 'yes'; r.calledAt = iso(c); } }
+  });
   refs.forEach(r => {
     if (r.status === 'rejected' || rnd() > 0.4) return;
     const t = Date.parse(r.created) + (2 + rnd() * 9) * 864e5; if (t > now) return;
-    r.appt = now - t < 4 * 864e5 ? 'pending' : 'approved'; r.apptAt = iso(t);
+    r.appt = now - t < 4 * 864e5 ? 'pending' : 'approved'; r.apptAt = iso(t); r.called = 'yes'; r.calledAt = iso(t - 864e5);
     if (rnd() > 0.35) return;
     const c = t + (1 + rnd() * 10) * 864e5; if (c > now) return;
     r.close = now - c < 4 * 864e5 ? 'pending' : 'approved'; r.closeAt = iso(c);

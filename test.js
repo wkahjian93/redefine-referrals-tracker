@@ -115,6 +115,16 @@ ok(s.tables.posts.slice(before2).filter(p => p.kind === 'milestone').length === 
 err(() => call(Object.assign({op: 'step', refId: lim.id, step: 'close', done: false}, ali)), 'approved_ask_leader', 'agent cannot undo an approved close');
 ok(call(Object.assign({op: 'approach', confirm: true, note: 'asked uncle, no names'}, ali)).logged, 'approach without names logged');
 
+// lead bonus needs a call within 14 days (marking the appointment counts as calling)
+ok(s.tables.refs.find(x => x.id === lim.id).calledAt, 'appointment marks the lead as called');
+const chong = s.tables.refs.find(x => x.postId === p1.post.id && x.name === 'Chong Mei Yee');
+let pre = CORE.bonusTable(call(Object.assign({op: 'sync'}, gm)).agents, s.tables.posts, s.tables.refs, CORE.monthKey(s.now().toISOString()), {lead: 1, appt: 5, close: 20}, s.now().toISOString()).find(x => x.name === 'Ali Tan');
+ok(pre.leads === 1 && pre.leadsToCall === 1, 'approved but not yet called = waiting for the call, not paid');
+ok(call(Object.assign({op: 'step', refId: chong.id, step: 'call'}, ali)).ref.calledAt, 'agent taps Called');
+err(() => call(Object.assign({op: 'step', refId: chong.id, step: 'call'}, ali)), 'already_marked', 'cannot mark the same call twice');
+err(() => call(Object.assign({op: 'step', refId: lim.id, step: 'call', done: false}, ali)), 'undo_appt_first', 'cannot undo a call when the appointment is marked');
+ok(s.pushes.some(p => p.ids[0] === s.tables.agents.find(a => a.name === 'Ali Tan').id && /approved/.test(p.note.title)), 'agent gets a pop-up when the leader approves');
+
 // monthly statement = the leader's sheet: Ali has 2 approaches, 2 approved leads, 1 appt, 1 close
 const all = call(Object.assign({op: 'sync'}, gm)), month = CORE.monthKey(s.now().toISOString());
 const row = CORE.bonusTable(all.agents, all.posts, all.refs, month, all.rates).find(x => x.name === 'Ali Tan');
@@ -134,6 +144,35 @@ ok(call(Object.assign({op: 'sync'}, ali)).paid[month].mine === 27 && call(Object
 const before = s.tables.posts.length;
 call(Object.assign({op: 'post', photo: PHOTO, covered: true, rows: ['Aa Bb', 'Cc Dd', 'Ee Ff', 'Gg Hh'].map(name => ({name}))}, mei));
 ok(s.tables.posts.slice(before).some(p => p.kind === 'milestone' && /5 referrals/.test(p.text)), 'milestone card at 5 this month');
+
+// lock-screen call reminders: day 7 to day 14, then forfeited
+const s2 = memStore({now: () => Date.parse('2026-11-01T02:00:00Z')}), c2 = q => CORE.handle(q, s2);
+const bob = {code: 'test-team', name: 'Bob Lee', pin: '1111'}, boss = {code: 'test-leader-code', name: 'Boss', pin: '2222'};
+c2(Object.assign({op: 'signin', create: true}, bob)); c2(Object.assign({op: 'signin', create: true}, boss));
+const bp = c2(Object.assign({op: 'post', photo: PHOTO, covered: true, rows: [{name: 'Call Me'}, {name: 'Called Fast'}]}, bob));
+const bref = s2.tables.refs.filter(r => r.postId === bp.post.id);
+c2(Object.assign({op: 'review', postId: bp.post.id, confirm: true, decisions: {[bref[0].id]: 'approved', [bref[1].id]: 'approved'}}, boss));
+c2(Object.assign({op: 'step', refId: bref[1].id, step: 'call'}, bob));
+s2.setNow('2026-11-05T01:00:00Z'); s2.pushes.length = 0;
+ok(CORE.callReminders(s2).reminded === 0, 'no reminder before day 7');
+s2.setNow('2026-11-08T03:00:00Z');
+ok(CORE.callReminders(s2).reminded === 1 && /Call 1 referral/.test(s2.pushes[0].note.title) && /Call Me/.test(s2.pushes[0].note.body), 'day 7: one pop-up naming the uncalled lead (not the called one)');
+ok(/7 days left/.test(s2.pushes[0].note.title), 'pop-up says days left (' + s2.pushes[0].note.title + ')');
+s2.setNow('2026-11-14T03:00:00Z'); s2.pushes.length = 0; CORE.callReminders(s2);
+ok(/last day/.test(s2.pushes[0].note.title), 'last day warning');
+s2.setNow('2026-11-16T01:00:00Z'); s2.pushes.length = 0;
+ok(CORE.callReminders(s2).reminded === 0, 'no more reminders after 14 days');
+const bt = CORE.bonusTable(s2.tables.agents, s2.tables.posts, s2.tables.refs, '2026-11', {lead: 1, appt: 5, close: 20}, s2.now().toISOString()).find(x => x.name === 'Bob Lee');
+ok(bt.leads === 1 && bt.leadsForfeit === 1 && bt.total === 1, 'uncalled after 14 days = forfeited; called one is paid RM1');
+c2(Object.assign({op: 'step', refId: bref[0].id, step: 'call'}, bob));
+ok(CORE.callState(s2.tables.refs.find(r => r.id === bref[0].id), s2.now().getTime()) === 'late', 'calling after 14 days is recorded but stays forfeited');
+// phone registration
+ok(c2(Object.assign({op: 'pushreg', pushToken: 'tok-' + 'x'.repeat(30)}, bob)).registered, 'phone registers for pop-ups');
+ok(c2(Object.assign({op: 'sync'}, bob)).me.devices === 1, 'app sees its phone is registered');
+c2(Object.assign({op: 'pushtest', delay: 15}, bob));
+ok(s2.pushes.some(p => /locked/.test(p.note.body)), '15-second lock-screen test');
+c2(Object.assign({op: 'pushoff'}, bob));
+ok(c2(Object.assign({op: 'sync'}, bob)).me.devices === 0, 'pop-ups can be turned off');
 
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');

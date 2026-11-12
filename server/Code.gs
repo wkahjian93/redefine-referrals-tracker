@@ -11,12 +11,15 @@ var CORE = (function () {
   var TABLES = {
     agents: ['id', 'name', 'pin', 'role', 'created', 'active'],
     posts: ['id', 'agentId', 'kind', 'giver', 'text', 'photoId', 'count', 'status', 'created', 'purged'],
-    refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt'],
+    refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt', 'called', 'calledAt'],
     comments: ['id', 'postId', 'agentId', 'text', 'created'],
     settings: ['key', 'value'],
     log: ['at', 'by', 'action', 'detail'],
-    sessions: ['token', 'agentId', 'created', 'lastSeen', 'device']
+    sessions: ['token', 'agentId', 'created', 'lastSeen', 'device'],
+    devices: ['token', 'agentId', 'created']
   };
+  var CALL_DAYS = 14;                   // a lead must be called within 14 days of posting, or its lead bonus is forfeited
+  var CALL_REMIND_DAYS = 7;             // from day 7 the agent gets a daily lock-screen reminder to call
   var KEEP_DAYS = 90;                    // client details are wiped after this; the name stays
   var SHOW_DAYS = 400;                   // how far back the app loads posts and chat
   var MAX_PHOTO_B64 = 2.5 * 1024 * 1024; // redacted photo, about 1.8 MB
@@ -230,7 +233,7 @@ var CORE = (function () {
   /* ---------- reading everything the app shows ---------- */
   function publicRef(r, mine) {
     var o = {id: r.id, postId: r.postId, agentId: r.agentId, name: r.name, status: r.status, dup: '', created: r.created, purged: r.purged ? 1 : 0,
-      appt: r.appt || '', apptAt: r.apptAt || '', close: r.close || '', closeAt: r.closeAt || ''};
+      appt: r.appt || '', apptAt: r.apptAt || '', close: r.close || '', closeAt: r.closeAt || '', calledAt: r.calledAt || ''};
     if (mine) o.dup = r.dup;
     if (mine && !r.purged) { o.age = r.age; o.phone = r.phone; o.gender = r.gender; o.remarks = r.remarks; }
     return o;
@@ -242,7 +245,8 @@ var CORE = (function () {
     var recent = function (x) { return new Date(x.created).getTime() >= cut; };
     return {
       ver: v, now: nowIso(store), keepDays: KEEP_DAYS,
-      me: {id: me.id, name: me.name, leader: leader},
+      me: {id: me.id, name: me.name, leader: leader, devices: store.load('devices').filter(function (d) { return d.agentId === me.id; }).length},
+      callDays: CALL_DAYS, callRemindDays: CALL_REMIND_DAYS,
       agents: store.load('agents').filter(function (a) { return String(a.active) !== 'false'; }).map(function (a) { return {id: a.id, name: a.name, role: a.role}; }),
       posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, photo: p.photoId && !p.purged ? 1 : 0, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
       refs: store.load('refs').map(function (r) { return publicRef(r, leader || r.agentId === me.id); }),
@@ -282,6 +286,8 @@ var CORE = (function () {
     p.count = mine.filter(function (r) { return r.status !== 'rejected'; }).length;
     store.save('refs', refs); store.save('posts', posts); store.version(true);
     log(store, me.id, 'review', p.id + ' ' + p.status);
+    var ok = mine.filter(function (r) { return r.status === 'approved'; }).length, R = rates(store);
+    if (ok && p.agentId !== me.id) store.push([p.agentId], {title: '💰 ' + ok + ' referral' + (ok === 1 ? '' : 's') + ' approved', body: 'RM' + (ok * R.lead) + ' bonus once you call each one within ' + CALL_DAYS + ' days. 📞 Call them now!', url: '#/leads', tag: 'approved-' + p.id});
     return {status: p.status};
   }
 
@@ -323,14 +329,21 @@ var CORE = (function () {
   function step(q, store, me, leader) {
     var refs = store.load('refs'), r = refs.filter(function (x) { return x.id === q.refId; })[0], kind = q.step, on = q.done !== false;
     if (!r) fail('not_found');
-    if (kind !== 'appt' && kind !== 'close') fail('bad_request');
+    if (kind !== 'appt' && kind !== 'close' && kind !== 'call') fail('bad_request');
     if (r.agentId !== me.id && !leader) fail('not_yours');
     if (r.status === 'rejected') fail('lead_not_counted');
+    if (kind === 'call') {   // the agent's own record, no approval needed; it decides whether the lead bonus is kept
+      if (on) { if (r.calledAt) fail('already_marked'); r.called = 'yes'; r.calledAt = nowIso(store); }
+      else { if (r.appt === 'pending' || r.appt === 'approved') fail('undo_appt_first'); r.called = ''; r.calledAt = ''; }
+      store.save('refs', refs); store.version(true); log(store, me.id, 'step', r.id + ' call ' + (on ? 'done' : 'undo'));
+      return {ref: publicRef(r, true)};
+    }
     var at = kind + 'At';
     if (on) {
       if (r[kind] && r[kind] !== 'rejected') fail('already_marked');
       if (kind === 'close' && !(r.appt === 'pending' || r.appt === 'approved')) fail('appointment_first');
       r[kind] = leader ? 'approved' : 'pending'; r[at] = nowIso(store);
+      if (kind === 'appt' && !r.calledAt) { r.called = 'yes'; r.calledAt = r[at]; }   // met them = called them
     } else {
       if (r[kind] === 'approved' && !leader) fail('approved_ask_leader');
       if (kind === 'appt' && (r.close === 'pending' || r.close === 'approved')) fail('undo_close_first');
@@ -363,6 +376,12 @@ var CORE = (function () {
     });
     store.save('refs', refs);
     done.forEach(function (p) { celebrate(store, p[0], p[1]); });
+    var R = rates(store), per = {};
+    done.forEach(function (p) { var r = p[0], k = p[1]; if (r.agentId === me.id) return; (per[r.agentId] = per[r.agentId] || []).push(k === 'close' ? ['🎯 Close', R.close, r.name] : ['☕ Appointment', R.appt, r.name]); });
+    Object.keys(per).forEach(function (id) {
+      var l = per[id], sum = l.reduce(function (s, x) { return s + x[1]; }, 0);
+      store.push([id], {title: '💰 +RM' + sum + ' approved', body: l.map(function (x) { return x[0] + ' · ' + x[2]; }).join(', '), url: '#/bonus', tag: 'step-' + id});
+    });
     store.version(true); log(store, me.id, 'step_review', n + ' updates');
     return {saved: n};
   }
@@ -378,17 +397,30 @@ var CORE = (function () {
 
   /* ---------- monthly bonus statement (same columns as the leader's sheet) ----------
      Approach = referral pages posted + "asked, no names"   (counted, not paid)
-     Leads    = approved referral names posted that month    x lead rate
+     Leads    = approved referral names posted that month AND called within 14 days   x lead rate
      Appt     = approved appointments dated that month       x appt rate
      Close    = approved closed cases dated that month       x close rate */
   function inMonth(iso, month) { return !!iso && monthKey(iso) === month; }
-  function bonusTable(agents, posts, refs, month, r) {
-    var rows = agents.map(function (a) { return {id: a.id, name: a.name, approach: 0, leads: 0, leadsWaiting: 0, appt: 0, apptWaiting: 0, close: 0, closeWaiting: 0, total: 0}; });
+  /* call state of a lead: 'ok' (called in time), 'late' (called after 14 days), 'due' (not called, still in time), 'forfeit' (not called, over 14 days) */
+  function callState(f, nowMs) {
+    var deadline = new Date(f.created).getTime() + CALL_DAYS * 864e5;
+    if (f.calledAt) return new Date(f.calledAt).getTime() <= deadline ? 'ok' : 'late';
+    return (nowMs || Date.now()) <= deadline ? 'due' : 'forfeit';
+  }
+  function bonusTable(agents, posts, refs, month, r, nowIso) {
+    var nowMs = nowIso ? new Date(nowIso).getTime() : Date.now();
+    var rows = agents.map(function (a) { return {id: a.id, name: a.name, approach: 0, leads: 0, leadsWaiting: 0, leadsToCall: 0, leadsForfeit: 0, appt: 0, apptWaiting: 0, close: 0, closeWaiting: 0, total: 0}; });
     var by = {}; rows.forEach(function (x) { by[x.id] = x; });
     posts.forEach(function (p) { var x = by[p.agentId]; if (x && (p.kind === 'approach' || (p.kind === 'referral' && p.status !== 'rejected')) && inMonth(p.created, month)) x.approach++; });
     refs.forEach(function (f) {
       var x = by[f.agentId]; if (!x || f.status === 'rejected') return;
-      if (inMonth(f.created, month)) { if (f.status === 'approved') x.leads++; else x.leadsWaiting++; }
+      if (inMonth(f.created, month)) {
+        var cs = callState(f, nowMs);
+        if (cs === 'forfeit' || cs === 'late') x.leadsForfeit++;                // no call within 14 days: lead bonus forfeited
+        else if (f.status !== 'approved') x.leadsWaiting++;                     // waiting leader approval
+        else if (cs === 'due') x.leadsToCall++;                                  // approved, waiting for the call
+        else x.leads++;                                                          // approved + called in time = paid
+      }
       if (inMonth(f.apptAt, month)) { if (f.appt === 'approved') x.appt++; else if (f.appt === 'pending') x.apptWaiting++; }
       if (inMonth(f.closeAt, month)) { if (f.close === 'approved') x.close++; else if (f.close === 'pending') x.closeWaiting++; }
     });
@@ -423,9 +455,47 @@ var CORE = (function () {
     var agents = store.load('agents'), a = agents.filter(function (x) { return x.id === q.agentId; })[0];
     if (!a) fail('not_found'); if (a.id === me.id) fail('cannot_remove_self');
     a.active = 'false'; store.save('agents', agents); store.version(true);
-    store.save('sessions', store.load('sessions').filter(function (x) { return x.agentId !== a.id; }));   // signs them out on every phone
+    store.save('sessions', store.load('sessions').filter(function (x) { return x.agentId !== a.id; }));
+    store.save('devices', store.load('devices').filter(function (x) { return x.agentId !== a.id; }));   // signs them out on every phone
     log(store, me.id, 'remove_agent', a.name);
     return {ok: true};
+  }
+
+  /* ---------- phone pop-ups (Firebase), same setup as REDEFINE Calendar ---------- */
+  function pushReg(q, store, me) {
+    var t = str(q.pushToken, 400); if (t.length < 20) fail('bad_request');
+    var rows = store.load('devices').filter(function (d) { return d.token !== t; });
+    rows.push({token: t, agentId: me.id, created: nowIso(store)}); store.save('devices', rows);
+    return {registered: true};
+  }
+  function pushOff(q, store, me) {
+    var t = str(q.pushToken, 400);
+    store.save('devices', store.load('devices').filter(function (d) { return !(d.agentId === me.id && (!t || d.token === t)); }));
+    return {off: true};
+  }
+  function pushTest(q, store, me) { store.push([me.id], {title: 'REDEFINE Referrals 🔔', body: 'Pop-ups are working on this phone.', tag: 'test', url: '#/me'}); return {sent: true}; }
+
+  /* Every morning: each agent with names not yet called for 7+ days gets one lock-screen reminder.
+     After 14 days without a call the lead bonus is forfeited. Returns how many agents were reminded. */
+  function callReminders(store) {
+    var nowMs = store.now().getTime(), by = {};
+    store.load('refs').forEach(function (f) {
+      if (f.status === 'rejected' || f.calledAt || f.purged) return;
+      var age = (nowMs - new Date(f.created).getTime()) / 864e5;
+      if (age < CALL_REMIND_DAYS || age > CALL_DAYS) return;
+      (by[f.agentId] = by[f.agentId] || []).push({name: f.name, left: Math.max(0, Math.ceil(CALL_DAYS - age))});
+    });
+    var active = {}; store.load('agents').forEach(function (a) { if (String(a.active) !== 'false') active[a.id] = 1; });
+    var n = 0;
+    Object.keys(by).forEach(function (id) {
+      if (!active[id]) return;
+      var l = by[id].sort(function (a, b) { return a.left - b.left; }), soon = l[0].left;
+      var names = l.slice(0, 3).map(function (x) { return x.name; }).join(', ') + (l.length > 3 ? ' +' + (l.length - 3) + ' more' : '');
+      store.push([id], {title: '📞 Call ' + l.length + ' referral' + (l.length === 1 ? '' : 's') + ' · ' + (soon <= 1 ? 'last day!' : soon + ' days left'),
+        body: names + '. No call within ' + CALL_DAYS + ' days = lead bonus forfeited. Tap ✓ Called after you call.', url: '#/leads', tag: 'call-reminder'});
+      n++;
+    });
+    return {reminded: n};
   }
 
   /* ---------- 3-month auto-delete (daily trigger) ---------- */
@@ -444,12 +514,18 @@ var CORE = (function () {
     return {wiped: n, photos: ph};
   }
 
-  var OPS = {signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
+  var OPS = {pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
 
   function handle(q, store) {
     if (!q || typeof q !== 'object') fail('bad_request');
     if (q.op === 'signin') {
       return store.withLock(function () { var r = signIn(q, store); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.role === 'leader'}, created: !!r.created, token: newSession(store, r.me, q.device)}; });
+    }
+    if (q.op === 'pushtest' && q.delay) {   // "test in 15 s": wait OUTSIDE the lock so nobody else is blocked
+      var w1 = store.withLock(function () { return who(q, store).me; });
+      if (store.sleep) store.sleep(Math.max(1, Math.min(20, +q.delay || 15)) * 1000);
+      store.push([w1.id], {title: 'REDEFINE Referrals 🔔', body: 'Pop-ups work even when the phone is locked. 👍', tag: 'test', url: '#/me'});
+      return {ok: true, sent: true};
     }
     if (q.op === 'read') {   // count the reading under the lock, but call the AI outside it (it can take 20 s)
       if (!b64ok(q.image, MAX_READ_B64)) fail('bad_photo');
@@ -460,7 +536,7 @@ var CORE = (function () {
     return store.withLock(function () { var w = who(q, store); var r = fn(q, store, w.me, w.leader); r.ok = true; return r; });
   }
 
-  return {bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
+  return {callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
 })();
 
 /* ===== server/gas.js ===== */
@@ -471,6 +547,8 @@ var CORE = (function () {
      OPENAI_API_KEY  required: reads the referral photos (sent with store:false; the original photo is never kept)
      MODEL           optional (default gpt-6.1-terra)
      DAILY_READS     optional, photo readings per agent per day (default 40)
+     FCM_SERVICE_ACCOUNT  for lock-screen pop-ups: the whole Firebase service-account JSON (the same one the REDEFINE Calendar uses)
+     APP_URL         optional, the app link used when a pop-up is tapped (default the GitHub Pages link)
    Data: private Google Sheet "REDEFINE Referrals Data" and Drive folder "REDEFINE Referrals Photos"
    (only the covered/censored photos). Both are created by setup(), which also installs the daily auto-delete. */
 
@@ -479,7 +557,9 @@ function doGet() { return reply({ok: true, app: 'REDEFINE Referrals Tracker'}); 
 
 function doPost(e) {
   try {
-    return reply(CORE.handle(JSON.parse(e.postData.contents), GAS));
+    var out = CORE.handle(JSON.parse(e.postData.contents), GAS);
+    GAS.flushPush();   // pop-ups go out after the data is saved and the lock is released
+    return reply(out);
   } catch (err) {
     if (err.appCode) return reply({error: err.appCode});
     console.error('server error: ' + (err && err.stack));
@@ -489,7 +569,7 @@ function doPost(e) {
 
 var GAS = (function () {
   var P = PropertiesService.getScriptProperties();
-  var cache = {};
+  var cache = {}, outbox = [];
 
   function book() {
     var id = P.getProperty('SHEET_ID');
@@ -552,6 +632,52 @@ var GAS = (function () {
     (msg.output || []).forEach(function (it) { if (it.type === 'message') (it.content || []).forEach(function (c) { if (c.type === 'output_text') text += c.text; }); });
     return text;
   }
+  /* Firebase Cloud Messaging (HTTP v1). The service account signs a short-lived token; it is cached for 50 minutes. */
+  function fcmAccess(sa) {
+    var c = CacheService.getScriptCache(), t = c.get('fcm_at'); if (t) return t;
+    var b64 = function (x) { return Utilities.base64EncodeWebSafe(x).replace(/=+$/, ''); };
+    var now = Math.floor(Date.now() / 1000);
+    var head = b64(JSON.stringify({alg: 'RS256', typ: 'JWT'})), claim = b64(JSON.stringify({iss: sa.client_email, scope: 'https://www.googleapis.com/auth/firebase.messaging', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600}));
+    var sig = b64(Utilities.computeRsaSha256Signature(head + '.' + claim, sa.private_key));
+    var res = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {method: 'post', muteHttpExceptions: true, payload: {grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: head + '.' + claim + '.' + sig}});
+    if (res.getResponseCode() !== 200) { console.error('fcm auth ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 300)); return ''; }
+    t = JSON.parse(res.getContentText()).access_token; c.put('fcm_at', t, 3000);
+    return t;
+  }
+  function flushPush() {
+    if (!outbox.length) return;
+    var list = outbox; outbox = [];
+    var raw = P.getProperty('FCM_SERVICE_ACCOUNT'); if (!raw) { console.log('pop-up skipped: FCM_SERVICE_ACCOUNT not set'); return; }
+    try {
+      var sa = JSON.parse(raw), at = fcmAccess(sa); if (!at) return;
+      cache = {};
+      var devices = load('devices'), base = P.getProperty('APP_URL') || 'https://wkahjian93.github.io/redefine-referrals-tracker/', reqs = [], tokens = [];
+      list.forEach(function (n) {
+        devices.forEach(function (d) {
+          if (n.ids.indexOf(d.agentId) < 0) return;
+          tokens.push(d.token);
+          reqs.push({url: 'https://fcm.googleapis.com/v1/projects/' + sa.project_id + '/messages:send', method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+            headers: {Authorization: 'Bearer ' + at},
+            payload: JSON.stringify({message: {token: d.token,
+              data: {title: n.note.title, body: n.note.body || '', url: n.note.url || '#/', tag: n.note.tag || ''},
+              webpush: {headers: {Urgency: 'high', TTL: '86400'},
+                notification: {title: n.note.title, body: n.note.body || '', icon: base + 'icons/icon-192.png', badge: base + 'icons/icon-192.png', tag: n.note.tag || undefined, renotify: !!n.note.tag},
+                fcm_options: {link: base + (n.note.url || '#/')}}}})});
+        });
+      });
+      if (!reqs.length) { console.log('pop-up "' + list[0].note.title + '": no registered phone'); return; }
+      var dead = [], ok = 0;
+      for (var i = 0; i < reqs.length; i += 50) UrlFetchApp.fetchAll(reqs.slice(i, i + 50)).forEach(function (r, k) {
+        var code = r.getResponseCode(), body = r.getContentText();
+        if (code === 200) ok++;
+        else if (code === 404 || code === 410 || /UNREGISTERED/.test(body)) { dead.push(tokens[i + k]); console.warn('phone no longer registered (removed): fcm ' + code); }
+        else console.warn('fcm ' + code + ' ' + body.slice(0, 300));
+      });
+      console.log('pop-ups: ' + ok + ' of ' + reqs.length + ' accepted by Firebase');
+      if (dead.length) { var l = LockService.getScriptLock(); l.waitLock(20000); try { cache = {}; save('devices', load('devices').filter(function (d) { return dead.indexOf(d.token) < 0; })); } finally { l.releaseLock(); } }
+    } catch (e) { console.error('push failed: ' + (e && e.stack)); }
+  }
+
   return {
     load: load, save: save,
     withLock: function (fn) { var l = LockService.getScriptLock(); l.waitLock(20000); try { cache = {}; return fn(); } finally { l.releaseLock(); } },
@@ -564,11 +690,15 @@ var GAS = (function () {
     putPhoto: function (name, b64) { return folder().createFile(Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', name)).getId(); },
     getPhoto: function (id) { return Utilities.base64Encode(DriveApp.getFileById(id).getBlob().getBytes()); },
     trashPhoto: function (id) { DriveApp.getFileById(id).setTrashed(true); },   // Drive empties trash after 30 days
-    ai: ai
+    ai: ai, flushPush: flushPush, sleep: function (ms) { Utilities.sleep(ms); },
+    push: function (ids, note) { if (ids && ids.length) outbox.push({ids: ids, note: note}); }
   };
 })();
 
 /* Runs every night (installed by setup): wipes client details older than 3 months, keeps the name. */
+/* Runs every morning at 9am (installed by setup): lock-screen reminder to call referrals waiting 7+ days (bonus forfeits at 14). */
+function dailyCallReminder() { var r = GAS.withLock(function () { return CORE.callReminders(GAS); }); GAS.flushPush(); console.log('Call reminders: ' + r.reminded + ' agent(s)'); }
+
 function dailyPurge() { GAS.withLock(function () { var r = CORE.purge(GAS); console.log('Auto-delete: ' + r.wiped + ' names wiped, ' + r.photos + ' photos deleted'); }); }
 
 /* Run once from the editor: creates the Sheet and Drive folder, asks for permissions, installs the 2am auto-delete. */
@@ -576,11 +706,14 @@ function setup() {
   Object.keys(CORE.TABLES).forEach(function (t) { GAS.load(t); });
   DriveApp.getRootFolder();
   UrlFetchApp.fetch('https://api.openai.com/v1/models', {muteHttpExceptions: true});
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'dailyPurge') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'dailyPurge' || t.getHandlerFunction() === 'dailyCallReminder') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('dailyCallReminder').timeBased().atHour(9).everyDays(1).inTimezone('Asia/Kuala_Lumpur').create();
   ScriptApp.newTrigger('dailyPurge').timeBased().atHour(2).everyDays(1).inTimezone('Asia/Kuala_Lumpur').create();
   var P = PropertiesService.getScriptProperties();
   console.log('Ready. Data sheet: ' + SpreadsheetApp.openById(P.getProperty('SHEET_ID')).getUrl());
   if ((P.getProperty('TEAM_CODE') || '').length < 6) console.warn('Add TEAM_CODE (6+ characters) in Script properties.');
   if ((P.getProperty('LEADER_CODE') || '').length < 10) console.warn('Add LEADER_CODE (10+ characters) in Script properties.');
   if (!P.getProperty('OPENAI_API_KEY')) console.warn('Add OPENAI_API_KEY in Script properties.');
+  if (!P.getProperty('FCM_SERVICE_ACCOUNT')) console.warn('Add FCM_SERVICE_ACCOUNT in Script properties (lock-screen pop-ups).');
+  else { try { console.log('Firebase project: ' + JSON.parse(P.getProperty('FCM_SERVICE_ACCOUNT')).project_id); } catch (e) { console.warn('FCM_SERVICE_ACCOUNT is not valid JSON - paste the whole file.'); } }
 }

@@ -38,6 +38,21 @@ var SOUND = (function () {
   return {
     unlock: ac, startMusic: startMusic, stopMusic: stopMusic, isPlaying: function () { return !!song && !song.paused; },
     ding: function () { if (!ac()) return; var t = ctx.currentTime; tone(988, t, 0.18, 'sine', 0.25); tone(1319, t + 0.12, 0.3, 'sine', 0.22); },
+    /* "Cash in" (about 2 s): register drawer clack, ka-ching bell, then coins jingling. Plays when your bonus is approved. */
+    cash: function () {
+      if (!ac()) return; var t = ctx.currentTime;
+      var len = Math.floor(ctx.sampleRate * 0.09), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+      var src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.8; g.gain.value = 0.55;
+      src.connect(bp); bp.connect(g); g.connect(master); src.start(t);                       // "ka" (drawer)
+      [2093, 2637, 3136, 4186].forEach(function (f, k) { tone(f, t + 0.07, 1.25 - k * 0.15, 'sine', 0.16 - k * 0.025); });   // "ching" (bell)
+      [1047, 1319].forEach(function (f) { tone(f, t + 0.07, 0.5, 'triangle', 0.08); });
+      for (var c = 0; c < 14; c++) {                                                         // coins
+        var at = t + 0.25 + c * 0.1 + Math.random() * 0.05, f2 = 2800 + Math.random() * 2600;
+        tone(f2, at, 0.12, 'triangle', 0.09 * (1 - c / 16)); tone(f2 * 1.5, at + 0.01, 0.08, 'sine', 0.04 * (1 - c / 16));
+      }
+    },
     cheer: function () { if (!ac()) return; var t = ctx.currentTime; [72, 76, 79, 84].forEach(function (m, i) { tone(hz(m), t + i * 0.09, 0.5, 'triangle', 0.18); }); }
   };
 })();

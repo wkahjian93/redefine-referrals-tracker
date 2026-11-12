@@ -5,7 +5,9 @@ module.exports = function memStore(opts = {}) {
   const tables = {}, photos = {}, props = Object.assign({TEAM_CODE: 'test-team', LEADER_CODE: 'test-leader-code'}, opts.props || {});
   let ver = 1, fails = 0, clock = opts.now ? opts.now() : null, n = 0;
   const store = {
-    tables, photos, props, prompts: [],
+    tables, photos, props, prompts: [], pushes: [],
+    push: (ids, note) => { if (ids && ids.length) store.pushes.push({ids, note}); },   // phone pop-ups are recorded, not sent
+    sleep: () => {},
     load: t => JSON.parse(JSON.stringify(tables[t] || [])),
     save: (t, rows) => { tables[t] = JSON.parse(JSON.stringify(rows)); },
     withLock: fn => fn(),

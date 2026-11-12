@@ -20,7 +20,7 @@
     no_names: 'There are no names to post.', privacy_not_confirmed: 'Please tick the privacy check first.', photo_gone: 'This photo was auto-deleted (older than 3 months).',
     leader_only: 'Only the leader can do this.', not_yours: 'You can only change your own posts.', approved_ask_leader: 'This page is already approved. Ask your leader to remove it.',
     not_found: 'This item no longer exists.', appointment_first: 'Mark the appointment first, then the close.', already_marked: 'Already marked.',
-    lead_not_counted: 'This lead was not counted, so it has no steps.', undo_close_first: 'Undo the close first.', bad_rate: 'Rates must be numbers (RM).', network: 'No connection. Check your internet and try again.', server_error: 'Server problem. Please try again.'
+    lead_not_counted: 'This lead was not counted, so it has no steps.', undo_close_first: 'Undo the close first.', undo_appt_first: 'Undo the appointment first.', bad_rate: 'Rates must be numbers (RM).', network: 'No connection. Check your internet and try again.', server_error: 'Server problem. Please try again.'
   };
   function errText(e) { return ERR[e && e.message] || (e && e.message) || 'Something went wrong.'; }
 
@@ -79,7 +79,7 @@
     });
   }
   function notifyPhone(title, body, tag) {
-    if (!document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!document.hidden || !('Notification' in window) || Notification.permission !== 'granted' || pushOn()) return;   // real lock-screen pop-ups come from the server instead
     try {
       if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(function (r) { r.showNotification(title, {body: body, tag: tag, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png'}); });
       else new Notification(title, {body: body, tag: tag, icon: 'icons/icon-192.png'});
@@ -108,6 +108,8 @@
       var first = !S.data; S.data = d; S.ver = d.ver; S.offline = false;
       saveCache();
       announce(first);
+      cashIn();
+      if (pushOn() && d.me.devices === 0 && !S.repairTried) { S.repairTried = true; repairPush(false); }   // server lost this phone: reconnect quietly
       return true;
     }).catch(function (e) {
       // stay signed in like WhatsApp: only a sign-out on this phone or removal by the leader ends it
@@ -116,6 +118,88 @@
       if (!silent && S.data) toast('Could not refresh', errText(e)); return false;
     });
   }
+  /* 💰 Cash in: when the leader approves my names, appointment or close, play the cash sound (about 2 s) once */
+  function cashIn() {
+    if (!S.data || !S.data.me) return;
+    var me = S.data.me.id, now = [], R = S.data.rates, sum = 0, n = {L: 0, A: 0, C: 0};
+    S.data.refs.forEach(function (r) {
+      if (r.agentId !== me) return;
+      if (r.status === 'approved') now.push('L' + r.id);
+      if (r.appt === 'approved') now.push('A' + r.id);
+      if (r.close === 'approved') now.push('C' + r.id);
+    });
+    var key = 'cashSeen.' + me, seen = LS.get(key, null);
+    LS.set(key, now);
+    if (!seen) return;   // first time on this phone: nothing is "new"
+    var had = {}; seen.forEach(function (k) { had[k] = 1; });
+    now.forEach(function (k) { if (!had[k]) n[k[0]]++; });
+    sum = n.L * R.lead + n.A * R.appt + n.C * R.close;
+    if (!n.L && !n.A && !n.C) return;
+    var parts = [n.L && n.L + ' name' + (n.L === 1 ? '' : 's'), n.A && n.A + ' appointment' + (n.A === 1 ? '' : 's'), n.C && n.C + ' close' + (n.C === 1 ? '' : 's')].filter(Boolean).join(' + ');
+    if (S.sounds) SOUND.cash();
+    toast('💰 +RM' + sum + ' approved!', parts + ' approved by your leader.' + (n.L ? ' Call each name within ' + (S.data.callDays || 14) + ' days to keep the lead bonus.' : ''), null, n.L ? '#/leads' : '#/bonus');
+  }
+  /* ---------- lock-screen pop-ups (Firebase, same project and method as REDEFINE Calendar) ---------- */
+  function pushOn() { return !!(CFG.firebase && LS.get('pushToken', '') && 'Notification' in window && Notification.permission === 'granted'); }
+  function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  function standalone() { return window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches); }
+  function loadScript(src) { return new Promise(function (ok, bad) { var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = bad; document.head.appendChild(s); }); }
+  var fbReady = null;
+  function firebaseMessaging() {
+    if (!fbReady) fbReady = loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js')
+      .then(function () { return loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js'); })
+      .then(function () { if (!firebase.apps.length) firebase.initializeApp(CFG.firebase); return firebase.messaging(); });
+    return fbReady;
+  }
+  function installHelp() {
+    modal('<h2>First, add the app to your Home Screen</h2><div class="muted">iPhone only shows lock-screen pop-ups for apps on the Home Screen:</div><ol class="steps" style="padding-left:18px;list-style:decimal"><li>Open this link in <b>Safari</b></li><li>Tap <b>Share</b> (square with arrow) → <b>Add to Home Screen</b></li><li>Open the app from the new icon → Me → <b>Turn on pop-ups</b></li></ol><div class="btns"><button class="btn primary" data-n>OK</button></div>', function (m, close) { m.querySelector('[data-n]').onclick = close; });
+  }
+  function enablePush() {
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || (isIOS() && !standalone())) {
+      if (isIOS()) return installHelp();
+      return toast('Not supported', 'This browser cannot show notifications. Try Chrome or Safari.');
+    }
+    return Notification.requestPermission().then(function (p) {
+      if (p !== 'granted') { toast('Notifications blocked', 'Allow notifications for this app in your phone settings.'); render(); return; }
+      return navigator.serviceWorker.ready.then(function (reg) {
+        return firebaseMessaging().then(function (m) { return m.getToken({vapidKey: CFG.vapidKey, serviceWorkerRegistration: reg}); });
+      }).then(function (t) {
+        if (!t) throw new Error('no_token');
+        return api('pushreg', {pushToken: t}).then(function () { LS.set('pushToken', t); toast('Pop-ups are ON 🔔', 'You will get call reminders even when the phone is locked.'); return api('pushtest'); });
+      }).then(function () { return refresh(true); }, function (e) { toast('Could not turn on pop-ups', errText(e)); });
+    });
+  }
+  var repairing = false;
+  function repairPush(loud) {   // brand-new registration (Apple / Google may have cancelled the old one)
+    if (repairing || !CFG.firebase || !('Notification' in window) || Notification.permission !== 'granted') { if (loud) enablePush(); return Promise.resolve(); }
+    repairing = true; if (loud) toast('Reconnecting pop-ups…', '');
+    return navigator.serviceWorker.ready.then(function (reg) {
+      return firebaseMessaging().then(function (m) {
+        return m.deleteToken().catch(function () {}).then(function () { return reg.pushManager.getSubscription(); })
+          .then(function (sub) { return sub ? sub.unsubscribe().catch(function () {}) : null; })
+          .then(function () { return m.getToken({vapidKey: CFG.vapidKey, serviceWorkerRegistration: reg}); });
+      });
+    }).then(function (t) { if (!t) throw new Error('no_token'); return api('pushreg', {pushToken: t}).then(function () { LS.set('pushToken', t); }); })
+      .then(function () { repairing = false; if (loud) toast('Pop-ups reconnected 🔔', 'Try the 15-second test.'); return refresh(true); },
+        function (e) { repairing = false; if (loud) toast('Could not reconnect', errText(e)); });
+  }
+  function refreshPush() {   // tokens can change; re-register quietly on each start
+    if (!pushOn()) return;
+    navigator.serviceWorker.ready.then(function (reg) {
+      return firebaseMessaging().then(function (m) { return m.getToken({vapidKey: CFG.vapidKey, serviceWorkerRegistration: reg}); });
+    }).then(function (t) { if (t && t !== LS.get('pushToken', '')) return api('pushreg', {pushToken: t}).then(function () { LS.set('pushToken', t); }); }).catch(function () {});
+  }
+  function pushOff() {
+    var t = LS.get('pushToken', '');
+    api('pushoff', {pushToken: t}).catch(function () {}).then(function () { LS.del('pushToken'); toast('Pop-ups off', 'Turn them back on any time in Me.'); return refresh(true); });
+  }
+  // A pop-up arrived while the app is on screen: show the in-app banner and refresh (which plays the cash sound if money came in).
+  if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', function (ev) {
+    var m = ev.data && ev.data.rrtPush; if (!m) return;
+    if (!isIOS() && !/approved/.test(m.title)) toast(m.title, m.body, null, m.url);
+    refresh(true);
+  });
+
   /* last data kept on the phone, so the app opens instantly and works without signal (read only) */
   function saveCache() { try { localStorage.setItem('rrt.cache', JSON.stringify({who: S.auth && S.auth.name, data: S.data})); } catch (e) {} }
   function loadCache() {
@@ -585,6 +669,20 @@
   function dayOfMonth() { return myt(new Date().toISOString()).getUTCDate(); }
   var STEP_TXT = {pending: 'waiting approval', approved: 'approved', rejected: 'not approved'};
   function stepPill(v) { return v ? '<span class="pill ' + (v === 'approved' ? 'approved' : v === 'rejected' ? 'rejected' : 'pending') + '">' + STEP_TXT[v] + '</span>' : ''; }
+  /* 14-day call rule: a referral must be called within 14 days of posting, or its lead bonus is forfeited */
+  function callInfo(r) {
+    var days = (S.data && S.data.callDays) || 14, created = new Date(r.created).getTime(), deadline = created + days * 864e5;
+    var st = CORE.callState(r, Date.now()), left = Math.ceil((deadline - Date.now()) / 864e5);
+    var d = myt(new Date(deadline).toISOString()), when = d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()];
+    return {state: st, left: left, when: when, age: (Date.now() - created) / 864e5};
+  }
+  function callChip(r) {
+    var c = callInfo(r);
+    if (c.state === 'ok') return '<span class="pill approved">📞 called</span>';
+    if (c.state === 'late') return '<span class="pill rejected">📞 called late · lead bonus forfeited</span>';
+    if (c.state === 'forfeit') return '<span class="pill rejected">⛔ not called in ' + ((S.data && S.data.callDays) || 14) + ' days · lead bonus forfeited</span>';
+    return '<span class="pill ' + (c.left <= 7 ? 'rejected' : 'pending') + '">📞 call by ' + c.when + ' · ' + (c.left <= 1 ? 'last day!' : c.left + ' days left') + '</span>';
+  }
   function leadRow(r) {
     if (r.status === 'rejected') return '<div class="ref-edit" style="grid-template-columns:1fr"><div><b class="faint" style="text-decoration:line-through">' + esc(r.name) + '</b> <span class="faint">not counted</span></div></div>';
     var me = S.data.me, mine = r.agentId === me.id || me.leader;
@@ -594,13 +692,24 @@
       if (!v || v === 'rejected') return '<button class="btn sm" data-step="' + k + '" data-ref="' + r.id + '"' + (k === 'close' && !(r.appt === 'pending' || r.appt === 'approved') ? ' disabled' : '') + '>' + label + '</button>' + (v === 'rejected' ? ' ' + stepPill(v) : '');
       return '<span class="chip">✓ ' + label + ' ' + stepPill(v) + (v === 'pending' || me.leader ? ' <a href="#" data-undo="' + k + '" data-ref="' + r.id + '" class="faint">undo</a>' : '') + '</span>';
     };
+    var callBtn = !mine ? '' : r.calledAt ? '<span class="chip">✓ 📞 Called ' + ago(r.calledAt) + (!(r.appt === 'pending' || r.appt === 'approved') ? ' <a href="#" data-undo="call" data-ref="' + r.id + '" class="faint">undo</a>' : '') + '</span>'
+      : '<button class="btn sm gold" data-step="call" data-ref="' + r.id + '">📞 Called</button>' + (r.phone ? ' <a class="btn sm" href="tel:' + esc(r.phone.replace(/[^\d+]/g, '')) + '">Call now</a>' : '');
     return '<div class="ref-edit" style="grid-template-columns:1fr"><div><b>' + esc(r.name) + '</b> <span class="faint">' + (r.status === 'pending' ? 'lead waiting approval · ' : '') + ago(r.created) + '</span>' +
-      '<div class="actions" style="margin-top:6px">' + btn('appt', '☕ Appointment done') + btn('close', '🎯 Closed case') + '</div></div></div>';
+      '<div style="margin-top:5px">' + callChip(r) + '</div>' +
+      '<div class="actions" style="margin-top:6px">' + callBtn + btn('appt', '☕ Appointment done') + btn('close', '🎯 Closed case') + '</div></div></div>';
   }
   function wireLeadRows(root) {
     root.querySelectorAll('[data-step]').forEach(function (b) {
       b.onclick = function () {
         var r = S.data.refs.filter(function (x) { return x.id === b.dataset.ref; })[0], k = b.dataset.step;
+        if (k === 'call') {
+          var c = callInfo(r);
+          return confirmBox('Called ' + r.name + '?', c.state === 'forfeit' ? 'It is past ' + ((S.data && S.data.callDays) || 14) + ' days, so the lead bonus is already forfeited, but calling still counts for your follow-up.' : 'Marking the call keeps your RM' + S.data.rates.lead + ' lead bonus for this name.', 'Yes, I called').then(function (y) {
+            if (!y) return; b.disabled = true;
+            api('step', {refId: r.id, step: 'call'}).then(function () { if (S.sounds) SOUND.ding(); toast('Call marked 📞', 'Next: book the appointment ☕'); return refresh(true); })
+              .catch(function (e) { b.disabled = false; toast('Not saved', errText(e)); });
+          });
+        }
         var what = k === 'appt' ? 'had an appointment with' : 'closed a case with';
         confirmBox(k === 'appt' ? 'Appointment done?' : 'Closed a case?', 'You ' + what + ' <b>' + esc(r.name) + '</b>. ' + (S.data.me.leader ? 'It counts right away.' : 'Your leader will approve it for the RM ' + S.data.rates[k] + ' bonus.'), 'Yes, mark it').then(function (y) {
           if (!y) return; b.disabled = true;
@@ -612,7 +721,8 @@
     root.querySelectorAll('[data-undo]').forEach(function (a) {
       a.onclick = function (e) {
         e.preventDefault();
-        confirmBox('Undo this?', 'Remove the ' + (a.dataset.undo === 'appt' ? 'appointment' : 'closed case') + ' mark?', 'Undo', true).then(function (y) {
+        var label = {appt: 'appointment', close: 'closed case', call: 'call'}[a.dataset.undo];
+        confirmBox('Undo this?', 'Remove the ' + label + ' mark?', 'Undo', true).then(function (y) {
           if (y) api('step', {refId: a.dataset.ref, step: a.dataset.undo, done: false}).then(function () { return refresh(true); }).catch(function (er) { toast('Not changed', errText(er)); });
         });
       };
@@ -622,14 +732,21 @@
     var me = S.data.me.id;
     return S.data.refs.filter(function (r) { return r.agentId === me && r.status !== 'rejected' && (!r.appt || r.appt === 'rejected' || ((r.appt === 'approved' || r.appt === 'pending') && (!r.close || r.close === 'rejected'))); });
   }
+  function myToCall() {   // my counted names not called yet and still inside the 14 days, most urgent first
+    var me = S.data.me.id;
+    return S.data.refs.filter(function (r) { return r.agentId === me && r.status !== 'rejected' && !r.purged && !r.calledAt && callInfo(r).state === 'due'; })
+      .sort(function (a, b) { return a.created < b.created ? -1 : 1; });
+  }
   function viewLeads() {
     var me = S.data.me.id, all = S.data.refs.filter(function (r) { return r.agentId === me; }).sort(function (a, b) { return a.created < b.created ? 1 : -1; });
-    var needAppt = all.filter(function (r) { return r.status !== 'rejected' && (!r.appt || r.appt === 'rejected'); });
+    var toCall = myToCall();
+    var needAppt = all.filter(function (r) { return r.status !== 'rejected' && toCall.indexOf(r) < 0 && (!r.appt || r.appt === 'rejected'); });
     var needClose = all.filter(function (r) { return r.status !== 'rejected' && (r.appt === 'pending' || r.appt === 'approved') && (!r.close || r.close === 'rejected'); });
     var done = all.filter(function (r) { return r.close === 'pending' || r.close === 'approved' || r.status === 'rejected'; });
-    var sec = function (t, sub, list) { return list.length ? '<div class="card"><h2>' + t + ' (' + list.length + ')</h2><div class="faint">' + sub + '</div>' + list.slice(0, 60).map(leadRow).join('') + '</div>' : ''; };
+    var sec = function (t, sub, list, hot) { return list.length ? '<div class="card"' + (hot ? ' style="border-color:var(--gold)"' : '') + '><h2>' + t + ' (' + list.length + ')</h2><div class="faint">' + sub + '</div>' + list.slice(0, 60).map(leadRow).join('') + '</div>' : ''; };
     return '<div style="margin-bottom:10px"><a href="#/me">← Me</a></div>' + remindersHtml() +
       (all.length ? '' : '<div class="empty">No leads yet. Snap a referral page first.</div>') +
+      sec('📞 Call these first', 'Call within ' + ((S.data && S.data.callDays) || 14) + ' days of posting, or the RM' + S.data.rates.lead + ' lead bonus is forfeited. Tap 📞 Called after each call.', toCall, true) +
       sec('Waiting for an appointment', 'Met them? Tap ☕ (RM ' + S.data.rates.appt + ').', needAppt) +
       sec('Met, not closed yet', 'Closed a case? Tap 🎯 (RM ' + S.data.rates.close + ').', needClose) +
       sec('Done', 'Closed cases and leads not counted.', done);
@@ -691,10 +808,10 @@
     var w = function (n) { return n ? '<div class="faint">+' + n + ' waiting</div>' : ''; };
     var html = '<div style="margin-bottom:10px"><a href="#/board">← Board</a></div><div class="card"><div class="row"><h2 class="grow">Referral bonus</h2><select id="bn-month" style="border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:7px">' +
       months.map(function (m) { return '<option value="' + m + '"' + (m === mk ? ' selected' : '') + '>' + monthName(m) + '</option>'; }).join('') + '</select></div>' +
-      '<div class="faint">Leads RM' + R.lead + ' each · Appointment RM' + R.appt + ' · Close RM' + R.close + '. Only approved items are paid; "waiting" needs leader approval first.</div>' +
+      '<div class="faint">Leads RM' + R.lead + ' each · Appointment RM' + R.appt + ' · Close RM' + R.close + '. Only approved items are paid; "waiting" needs leader approval first. A lead is paid only if it is called within ' + ((S.data && S.data.callDays) || 14) + ' days, otherwise it is forfeited.</div>' +
       (paid ? '<div class="notice good">✅ Marked paid on ' + dayLabel(paid.at) + (me.leader ? ' by ' + esc(paid.by) + ': RM' + paid.total.toLocaleString() : ': RM' + paid.mine.toLocaleString() + ' to you') + '</div>' : (mk < curMonth() ? '<div class="notice warn">Not marked paid yet.</div>' : '<div class="notice info">Month in progress · ' + daysLeftInMonth() + ' day' + (daysLeftInMonth() === 1 ? '' : 's') + ' left to update appointments and closes.</div>')) +
       '<div class="scroll-x"><table class="data"><tr><th>Name</th><th class="n">Approach</th><th class="n">Leads<br>(RM' + R.lead + ')</th><th class="n">Appt<br>(RM' + R.appt + ')</th><th class="n">Close<br>(RM' + R.close + ')</th><th class="n">Total</th></tr>' +
-      rows.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="n">' + (x.approach || '') + '</td><td class="n">' + (x.leads || '') + w(x.leadsWaiting) + '</td><td class="n">' + (x.appt || '') + w(x.apptWaiting) + '</td><td class="n">' + (x.close || '') + w(x.closeWaiting) + '</td><td class="n"><b>RM' + x.total.toFixed(2) + '</b></td></tr>'; }).join('') +
+      rows.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="n">' + (x.approach || '') + '</td><td class="n">' + (x.leads || '') + w(x.leadsWaiting) + (x.leadsToCall ? '<div class="faint">+' + x.leadsToCall + ' to call</div>' : '') + (x.leadsForfeit ? '<div class="faint" style="color:var(--bad)">' + x.leadsForfeit + ' forfeited</div>' : '') + '</td><td class="n">' + (x.appt || '') + w(x.apptWaiting) + '</td><td class="n">' + (x.close || '') + w(x.closeWaiting) + '</td><td class="n"><b>RM' + x.total.toFixed(2) + '</b></td></tr>'; }).join('') +
       (me.leader ? '<tr><td><b>Total</b></td><td class="n"><b>' + sum('approach') + '</b></td><td class="n"><b>' + sum('leads') + '</b></td><td class="n"><b>' + sum('appt') + '</b></td><td class="n"><b>' + sum('close') + '</b></td><td class="n"><b>RM' + sum('total').toFixed(2) + '</b></td></tr>' : '') +
       '</table></div>';
     if (paid && me.leader && paid.total !== sum('total')) html += '<div class="notice warn">Numbers changed after you marked it paid (paid RM' + paid.total + ', now RM' + sum('total') + '). Check late approvals.</div>';
@@ -708,8 +825,8 @@
     q('#bn-month').onchange = function (e) { location.hash = '#/bonus/' + e.target.value; };
     if (q('#bn-csv')) q('#bn-csv').onclick = function () {
       var R = S.data.rates, rows = CORE.bonusTable(S.data.agents, S.data.posts, S.data.refs, mk, R);
-      var lines = [['Name', 'Approach', 'Leads Obtain (RM' + R.lead + ')', 'Successful Appointment (RM' + R.appt + ')', 'Close Case (RM' + R.close + ')', 'Total (RM)', 'Waiting approval'].join(',')]
-        .concat(rows.map(function (x) { return ['"' + x.name.replace(/"/g, '""') + '"', x.approach, x.leads, x.appt, x.close, x.total.toFixed(2), x.leadsWaiting + x.apptWaiting + x.closeWaiting].join(','); }));
+      var lines = [['Name', 'Approach', 'Leads Obtain (RM' + R.lead + ')', 'Successful Appointment (RM' + R.appt + ')', 'Close Case (RM' + R.close + ')', 'Total (RM)', 'Waiting approval', 'Leads to call', 'Leads forfeited (no call in 14 days)'].join(',')]
+        .concat(rows.map(function (x) { return ['"' + x.name.replace(/"/g, '""') + '"', x.approach, x.leads, x.appt, x.close, x.total.toFixed(2), x.leadsWaiting + x.apptWaiting + x.closeWaiting, x.leadsToCall, x.leadsForfeit].join(','); }));
       var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], {type: 'text/csv'})); a.download = 'referral-bonus-' + mk + '.csv'; a.click();
     };
     if (q('#bn-paid')) q('#bn-paid').onclick = function () {
@@ -744,10 +861,14 @@
     if (!S.data) return [];
     var me = S.data.me, out = [], cm = curMonth(), left = daysLeftInMonth(), dom = dayOfMonth();
     var mineThisMonth = S.data.posts.some(function (p) { return p.agentId === me.id && (p.kind === 'approach' || p.kind === 'referral') && monthKey(p.created) === cm; });
-    var stale = myOpenLeads().filter(function (r) { return (Date.now() - new Date(r.created).getTime()) > 7 * 864e5 && (!r.appt || r.appt === 'rejected'); });
+    var toCall = myToCall(), urgent = toCall.filter(function (r) { return callInfo(r).age >= ((S.data && S.data.callRemindDays) || 7); });
+    var stale = myOpenLeads().filter(function (r) { return r.calledAt && (Date.now() - new Date(r.calledAt).getTime()) > 7 * 864e5 && (!r.appt || r.appt === 'rejected'); });
     if (left <= 3) out.push({id: 'monthend', icon: '⏰', text: (left ? left + ' day' + (left === 1 ? '' : 's') + ' left' : 'Last day') + ' this bonus month. Snap your pages and update appointments & closes today.', go: '#/leads'});
     if (!mineThisMonth && dom >= 5) out.push({id: 'none', icon: '📒', text: 'No referral page from you this month yet. Ask one happy client for names today.', go: '#/snap'});
-    if (stale.length) out.push({id: 'stale', icon: '☕', text: stale.length + ' lead' + (stale.length === 1 ? ' has' : 's have') + ' waited over a week. Met them? Tap ☕ Appointment done.', go: '#/leads'});
+    if (CFG.firebase && !pushOn()) out.push({id: 'push', icon: '🔔', text: 'Turn on lock-screen pop-ups so you never miss a call reminder (no call in ' + ((S.data && S.data.callDays) || 14) + ' days = lead bonus forfeited).', go: '#/me'});
+    if (urgent.length) { var soon = callInfo(urgent[0]).left; out.push({id: 'call', icon: '📞', text: 'Call ' + urgent.length + ' referral' + (urgent.length === 1 ? '' : 's') + ' (' + urgent.slice(0, 2).map(function (r) { return r.name; }).join(', ') + (urgent.length > 2 ? '…' : '') + '). ' + (soon <= 1 ? 'Last day' : soon + ' days left') + ' before the lead bonus is forfeited.', go: '#/leads'}); }
+    else if (toCall.length) out.push({id: 'call', icon: '📞', text: toCall.length + ' new referral' + (toCall.length === 1 ? '' : 's') + ' to call. Call within ' + ((S.data && S.data.callDays) || 14) + ' days to keep the lead bonus.', go: '#/leads'});
+    if (stale.length) out.push({id: 'stale', icon: '☕', text: stale.length + ' lead' + (stale.length === 1 ? '' : 's') + ' called over a week ago, no appointment yet. Met them? Tap ☕ Appointment done.', go: '#/leads'});
     var lm = shiftMonth(cm, -1), paid = (S.data.paid || {})[lm];
     if (dom <= 7 && !me.leader) {
       var mine = CORE.bonusTable(S.data.agents, S.data.posts, S.data.refs, lm, S.data.rates).filter(function (x) { return x.id === me.id; })[0];
@@ -805,7 +926,11 @@
     html += '<div class="card"><h2>Settings</h2>' +
       '<label class="check"><input type="checkbox" id="me-music"' + (S.music ? ' checked' : '') + '><span>Team song ♪ (转介绍) · plays when the app opens</span></label>' +
       '<label class="check"><input type="checkbox" id="me-sound"' + (S.sounds ? ' checked' : '') + '><span>Sound for new messages and referrals</span></label>' +
-      '<div class="row" style="padding:8px 0"><div class="grow">Phone pop-up alerts<div class="faint">' + (notif || 'Shows alerts while the app is open in the background') + '</div></div>' + (!notif ? '<button class="btn sm" id="me-notif">Turn on</button>' : '') + '</div>' +
+      '<div style="padding:8px 0;border-top:1px solid var(--line);margin-top:6px"><b>🔔 Lock-screen pop-ups</b><div class="faint">Call reminders (day 7 to 14), approvals 💰 and more, even when the phone is locked.</div>' +
+      (pushOn() ? (me.devices ? '<div class="notice good">ON for this phone.</div>' : '<div class="notice warn">The server lost this phone. Tap Reconnect.</div>') +
+        '<div class="actions"><button class="btn sm" id="me-ptest">Test in 15 s (lock phone)</button><button class="btn sm" id="me-pfix">Reconnect</button><button class="btn sm danger" id="me-poff">Turn off</button></div>'
+        : (notif === 'Blocked in phone settings' ? '<div class="notice bad">Blocked. Allow notifications for this app in your phone settings, then come back.</div>' : '') + '<div class="actions"><button class="btn gold" id="me-pon">Turn on pop-ups</button></div>') +
+      '<div class="faint" style="margin-top:6px">' + (isIOS() ? 'iPhone' : 'Android / other') + (standalone() ? ' · home-screen app' : ' · browser') + ' · notifications: ' + ('Notification' in window ? Notification.permission : 'not supported') + ' · server has ' + (me.devices || 0) + ' phone(s) for you</div></div>' +
       '<div class="faint">Tip: install the app. iPhone: Safari → Share → Add to Home Screen. Android: Chrome menu → Add to Home screen.</div></div>';
     if (me.leader) {
       html += '<div class="card"><h2>Leader settings · bonus rates (RM)</h2><div class="tiles" style="grid-template-columns:1fr 1fr 1fr;margin:8px 0">' +
@@ -824,7 +949,10 @@
     };
     q('#me-music').onchange = function (e) { S.music = e.target.checked; LS.set('musicOn', S.music); if (S.music) SOUND.startMusic(); else SOUND.stopMusic(); render(); };
     q('#me-sound').onchange = function (e) { S.sounds = e.target.checked; LS.set('sounds', S.sounds); if (S.sounds) SOUND.ding(); };
-    if (q('#me-notif')) q('#me-notif').onclick = function () { Notification.requestPermission().then(function () { render(); startPolling(); }); };
+    if (q('#me-pon')) q('#me-pon').onclick = function () { enablePush(); };
+    if (q('#me-pfix')) q('#me-pfix').onclick = function () { repairPush(true); };
+    if (q('#me-poff')) q('#me-poff').onclick = function () { confirmBox('Turn off pop-ups?', 'You will miss call reminders, and leads not called in ' + (S.data.callDays || 14) + ' days lose their bonus.', 'Turn off', true).then(function (y) { if (y) pushOff(); }); };
+    if (q('#me-ptest')) q('#me-ptest').onclick = function () { toast('Lock your phone now 🔒', 'A pop-up should arrive in about 15 seconds.'); api('pushtest', {delay: 15}).catch(function () {}); };
     if (q('#me-rate-save')) q('#me-rate-save').onclick = function () {
       var v = {}; root.querySelectorAll('[data-rate]').forEach(function (i) { v[i.dataset.rate] = i.value.trim(); });
       confirmBox('Change bonus rates?', 'Lead RM' + esc(v.lead) + ' · Appointment RM' + esc(v.appt) + ' · Close RM' + esc(v.close) + '.<br>This also changes the totals of months not yet marked paid.', 'Save').then(function (y) {
@@ -844,7 +972,7 @@
   /* ---------- start ---------- */
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});
   function start() {
-    keepStorage(); loadCache();
+    keepStorage(); loadCache(); refreshPush();
     if (S.data) route(); else render();   // open instantly with what was saved on this phone
     refresh(!!S.data).then(function () { startPolling(); route(); });
   }
