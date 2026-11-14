@@ -26,7 +26,7 @@ a { color: var(--blue); }
 .top { position: sticky; top: 0; z-index: 20; background: var(--ink); color: #fff; padding: calc(env(safe-area-inset-top, 0px) + 10px) 0 10px; }
 .top .wrap { display: flex; align-items: center; gap: 10px; }
 .brand { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; }
-.brand img { width: 30px; height: 30px; border-radius: 8px; }
+.brand img { width: 30px; height: 30px; object-fit: contain; }
 .brand b { font-size: 16px; letter-spacing: .3px; white-space: nowrap; }
 .brand b span { color: var(--gold); }
 .brand small { display: block; font-size: 11px; color: #B9B6AE; font-weight: 400; }
@@ -156,7 +156,7 @@ table.data td.n, table.data th.n { text-align: right; }
 
 /* sign-in */
 .signin { min-height: 100vh; background: var(--ink); color: #fff; display: flex; flex-direction: column; justify-content: center; padding: 30px 22px; }
-.signin .logo { width: 76px; height: 76px; border-radius: 20px; margin-bottom: 14px; }
+.signin .logo { width: 150px; height: auto; margin-bottom: 18px; }
 .signin h1 { margin: 0; font-size: 26px; }
 .signin h1 span { color: var(--gold); }
 .signin p { color: #B9B6AE; margin: 6px 0 20px; }

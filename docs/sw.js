@@ -1,8 +1,8 @@
 // Network first and always revalidated, so phones get updates as soon as they are online; falls back to the cache offline.
 // Also shows the lock-screen pop-ups that arrive from the server (Firebase Cloud Messaging) - by itself, without the
 // Firebase library, so it works the same on Android and iPhone and even when the app is closed (same as REDEFINE Calendar).
-const CACHE = 'referrals-v11';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'sound.js', 'redact.js', 'core.js', 'config.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
+const CACHE = 'referrals-v13';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'sound.js', 'redact.js', 'core.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/mark-white.png', 'icons/logo-white.png'];
 const IOS = /iphone|ipad|ipod|macintosh/i.test(self.navigator.userAgent) && /safari/i.test(self.navigator.userAgent) && !/chrome|crios|android/i.test(self.navigator.userAgent);
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).catch(() => {})); });
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));

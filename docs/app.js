@@ -258,13 +258,13 @@
   /* ---------- shell ---------- */
   function render() {
     if (!S.auth) return renderSignIn();
-    if (!S.data) { $app.innerHTML = '<div class="signin"><div class="box" style="text-align:center"><img class="logo" src="icons/icon-192.png" alt=""><div class="spinner"></div><p>Loading your team…</p></div></div>'; return; }
+    if (!S.data) { $app.innerHTML = '<div class="signin"><div class="box" style="text-align:center"><img class="logo" src="icons/logo-white.png" alt="REDEFINE"><div class="spinner"></div><p>Loading your team…</p></div></div>'; return; }
     var v = route.current, sc = window.scrollY;
     var views = {feed: viewFeed, post: viewPost, board: viewBoard, snap: viewSnap, me: viewMe, review: viewReview, leads: viewLeads, steps: viewSteps, bonus: viewBonus};
     var body = (views[v] || viewFeed)();
     $app.innerHTML = (CFG.sample ? '<div class="sample-bar">' + esc(CFG.sample) + '</div>' : '') +
       (S.offline ? '<div class="sample-bar" style="background:#6B6A66;color:#fff">No signal · showing what was saved on this phone</div>' : '') +
-      '<header class="top"><div class="wrap"><div class="brand"><img src="icons/icon-192.png" alt=""><div><b>REDEFINE <span>Prospecting</span></b><small>' + esc(teamMonthTotal()) + ' team prospects this month</small></div></div>' +
+      '<header class="top"><div class="wrap"><div class="brand"><img src="icons/mark-white.png" alt="REDEFINE"><div><b>REDEFINE <span>Prospecting</span></b><small>' + esc(teamMonthTotal()) + ' team prospects this month</small></div></div>' +
       '<button class="icon-btn' + (S.music ? ' on' : '') + '" id="music" aria-label="Background music" title="Background music">♪</button></div></header>' +
       '<main><div class="wrap" id="view"></div></main>' + tabsHtml();
     var view = document.getElementById('view');
@@ -294,7 +294,7 @@
   /* ---------- sign in ---------- */
   function renderSignIn() {
     var last = LS.get('lastName', '');
-    $app.innerHTML = '<div class="signin"><div class="box"><img class="logo" src="icons/icon-192.png" alt="">' +
+    $app.innerHTML = '<div class="signin"><div class="box"><img class="logo" src="icons/logo-white.png" alt="REDEFINE">' +
       '<h1>REDEFINE <span>Prospecting</span></h1><p>Snap your referral page or roadshow list. The app counts it, hides client privacy, and the whole team cheers you on.</p>' +
       '<label class="field"><span>Team code (from your leader)</span><input id="si-code" autocomplete="off" autocapitalize="off"></label>' +
       '<label class="field"><span>Your name (as the team knows you)</span><input id="si-name" value="' + esc(last) + '" autocomplete="name"></label>' +

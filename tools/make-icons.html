@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Icon maker</title>
+<body style="font-family:sans-serif;background:#ccc">
+<p id="st">Working…</p>
+<div id="out"></div>
+<script>
+// Makes the app icons from the REDEFINE hexagon (tools/mark-src.png) and white versions of the mark and full logo
+// for the dark header / sign-in screen. Run through the local server: http://localhost:5198/tools/make-icons.html
+const save = (name, canvas) => fetch('/__save?name=' + name, {method: 'POST', body: canvas.toDataURL('image/png').split(',')[1]});
+const load = src => new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = src; });
+function icon(mark, size) {   // navy hexagon centred on white, full square (phones round the corners themselves)
+  const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d');
+  g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, size, size);
+  const k = size * 0.58 / Math.max(mark.width, mark.height), w = mark.width * k, h = mark.height * k;
+  g.imageSmoothingQuality = 'high'; g.drawImage(mark, (size - w) / 2, (size - h) / 2, w, h);
+  return c;
+}
+function white(img, maxW) {   // same shape, painted white
+  const k = Math.min(1, maxW / img.width), c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, c.width, c.height);
+  g.globalCompositeOperation = 'source-in'; g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+(async () => {
+  const mark = await load('/tools/mark-src.png'), logo = await load('/tools/logo-src.png');
+  const items = [['icon-192.png', icon(mark, 192)], ['icon-512.png', icon(mark, 512)], ['apple-touch-icon.png', icon(mark, 180)], ['mark-white.png', white(mark, 160)], ['logo-white.png', white(logo, 480)]];
+  for (const [n, c] of items) { await save(n, c); c.style.cssText = 'margin:6px;background:#0B0C10;max-width:200px'; document.getElementById('out').appendChild(c); }
+  document.getElementById('st').textContent = 'Done: ' + items.map(i => i[0]).join(', ');
+})().catch(e => { document.getElementById('st').textContent = 'Error: ' + e.message; });
+</script>
