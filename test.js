@@ -204,6 +204,28 @@ s3.setNow('2027-02-15T03:00:00Z'); CORE.purge(s3);
 ok(!s3.photos[rp.post.selfieId] && !s3.tables.posts.find(p => p.id === rp.post.id).selfieId, 'selfie auto-deleted after 3 months too');
 ok(s3.tables.posts.find(p => p.id === rp.post.id).location === 'Queensbay Mall', 'roadshow place kept after 3 months');
 
+// photos removed 30 days after the leader's review (saves space); names + details stay until 90 days
+const s4 = memStore({now: () => Date.parse('2026-11-01T02:00:00Z')}), c4 = q => CORE.handle(q, s4);
+const ag4 = {code: 'test-team', name: 'Photo Agent', pin: '5555'}, ld4 = {code: 'test-leader-code', name: 'Photo Lead', pin: '6666'};
+c4(Object.assign({op: 'signin', create: true}, ag4)); c4(Object.assign({op: 'signin', create: true}, ld4));
+const pp4 = c4(Object.assign({op: 'post', source: 'roadshow', location: 'Gurney Plaza', photo: PHOTO, selfie: PHOTO, covered: true, rows: [{name: 'Pat One', phone: '0123334444'}]}, ag4));
+const pend4 = c4(Object.assign({op: 'post', photo: PHOTO, covered: true, rows: [{name: 'Still Pending'}]}, ag4));
+s4.setNow('2026-11-05T02:00:00Z');
+const r4 = s4.tables.refs.find(r => r.postId === pp4.post.id);
+c4(Object.assign({op: 'review', postId: pp4.post.id, confirm: true, decisions: {[r4.id]: 'approved'}}, ld4));
+ok(s4.tables.posts.find(p => p.id === pp4.post.id).reviewedAt, 'approval starts the 30-day photo clock');
+s4.setNow('2026-12-04T03:00:00Z'); CORE.purge(s4);
+ok(s4.tables.posts.find(p => p.id === pp4.post.id).photoId, 'photos kept before 30 days');
+const v4 = s4.version(false); CORE.purge(s4);
+ok(s4.version(false) === v4, 'nightly job does not re-save when nothing changed');
+s4.setNow('2026-12-05T03:00:00Z'); const pr4 = CORE.purge(s4), post4 = s4.tables.posts.find(p => p.id === pp4.post.id);
+ok(pr4.photos === 2 && !post4.photoId && !post4.selfieId && post4.photoRemoved && !s4.photos[pp4.post.selfieId], 'list photo + selfie deleted 30 days after approval');
+ok(s4.tables.refs.find(r => r.id === r4.id).phone === '0123334444' && post4.location === 'Gurney Plaza', 'names, contact and place stay (until 90 days)');
+ok(s4.tables.posts.find(p => p.id === pend4.post.id).photoId, 'page still waiting for review keeps its photo');
+const sy4 = c4(Object.assign({op: 'sync'}, ag4)).posts.find(p => p.id === pp4.post.id);
+ok(sy4.photo === 0 && sy4.selfie === 0 && sy4.photoRemoved, 'app is told the photo was removed');
+err(() => c4(Object.assign({op: 'photo', postId: pp4.post.id}, ld4)), 'photo_gone', 'removed photo no longer served');
+
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');
 call(Object.assign({op: 'removeAgent', agentId: meiAgent.id, confirm: true}, gm));

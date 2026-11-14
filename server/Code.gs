@@ -10,7 +10,7 @@
 var CORE = (function () {
   var TABLES = {
     agents: ['id', 'name', 'pin', 'role', 'created', 'active'],
-    posts: ['id', 'agentId', 'kind', 'giver', 'text', 'photoId', 'count', 'status', 'created', 'purged', 'source', 'location', 'selfieId'],
+    posts: ['id', 'agentId', 'kind', 'giver', 'text', 'photoId', 'count', 'status', 'created', 'purged', 'source', 'location', 'selfieId', 'reviewedAt', 'photoRemoved'],
     refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt', 'called', 'calledAt', 'source'],
     comments: ['id', 'postId', 'agentId', 'text', 'created'],
     settings: ['key', 'value'],
@@ -20,6 +20,7 @@ var CORE = (function () {
   };
   var CALL_DAYS = 14;                   // a lead must be called within 14 days of posting, or its lead bonus is forfeited
   var CALL_REMIND_DAYS = 7;             // from day 7 the agent gets a daily lock-screen reminder to call
+  var PHOTO_DAYS = 30;                   // photos (name list + selfie) are deleted 30 days after the leader's review, to save space
   var KEEP_DAYS = 90;                    // client details are wiped after this; the name stays
   var SHOW_DAYS = 400;                   // how far back the app loads posts and comments
   var MAX_PHOTO_B64 = 2.5 * 1024 * 1024; // redacted photo, about 1.8 MB
@@ -258,7 +259,7 @@ var CORE = (function () {
       me: {id: me.id, name: me.name, leader: leader, devices: store.load('devices').filter(function (d) { return d.agentId === me.id; }).length},
       callDays: CALL_DAYS, callRemindDays: CALL_REMIND_DAYS,
       agents: store.load('agents').filter(function (a) { return String(a.active) !== 'false'; }).map(function (a) { return {id: a.id, name: a.name, role: a.role}; }),
-      posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, source: p.source || 'referral', location: p.location || '', selfie: p.selfieId && !p.purged ? 1 : 0, photo: p.photoId && !p.purged ? 1 : 0, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
+      posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, source: p.source || 'referral', location: p.location || '', selfie: p.selfieId && !p.purged ? 1 : 0, photo: p.photoId && !p.purged ? 1 : 0, photoRemoved: p.photoRemoved || '', reviewedAt: p.reviewedAt || '', photoDays: PHOTO_DAYS, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
       refs: store.load('refs').map(function (r) { return publicRef(r, leader || r.agentId === me.id); }),
       comments: store.load('comments').filter(recent),
       rates: rates(store),
@@ -296,6 +297,7 @@ var CORE = (function () {
     p.status = s.every(function (x) { return x === 'approved'; }) ? 'approved' : s.every(function (x) { return x === 'rejected'; }) ? 'rejected'
       : s.some(function (x) { return x === 'pending'; }) ? 'pending' : 'partial';
     p.count = mine.filter(function (r) { return r.status !== 'rejected'; }).length;
+    p.reviewedAt = p.status === 'pending' ? '' : nowIso(store);   // the 30-day photo clock starts when nothing is left to review
     store.save('refs', refs); store.save('posts', posts); store.version(true);
     log(store, me.id, 'review', p.id + ' ' + p.status);
     var ok = mine.filter(function (r) { return r.status === 'approved'; }).length, R = rates(store);
@@ -514,18 +516,25 @@ var CORE = (function () {
 
   /* ---------- 3-month auto-delete (daily trigger) ---------- */
   function purge(store) {
-    var refs = store.load('refs'), posts = store.load('posts'), now = nowIso(store), n = 0, ph = 0;
+    var refs = store.load('refs'), posts = store.load('posts'), now = nowIso(store), n = 0, ph = 0, changed = false;
     refs.forEach(function (r) {
       if (!r.purged && daysAgo(store, r.created) >= KEEP_DAYS) { r.age = ''; r.phone = ''; r.gender = ''; r.remarks = ''; r.purged = now; n++; }
     });
     posts.forEach(function (p) {
-      if (p.kind === 'referral' && !p.purged && daysAgo(store, p.created) >= KEEP_DAYS) {
+      if (p.kind !== 'referral' || p.purged) return;
+      if (p.status !== 'pending' && !p.reviewedAt) { p.reviewedAt = now; changed = true; }   // reviewed before this rule existed: start the clock today
+      if (p.reviewedAt && !p.photoRemoved && (p.photoId || p.selfieId) && daysAgo(store, p.reviewedAt) >= PHOTO_DAYS) {   // 30 days after approval: photos go, names and details stay
+        if (p.photoId) { try { store.trashPhoto(p.photoId); } catch (e) {} ph++; }
+        if (p.selfieId) { try { store.trashPhoto(p.selfieId); } catch (e) {} ph++; }
+        p.photoId = ''; p.selfieId = ''; p.photoRemoved = now; changed = true;
+      }
+      if (daysAgo(store, p.created) >= KEEP_DAYS) {
         if (p.photoId) { try { store.trashPhoto(p.photoId); } catch (e) {} ph++; }
         if (p.selfieId) { try { store.trashPhoto(p.selfieId); } catch (e) {} }
         p.photoId = ''; p.selfieId = ''; p.giver = ''; p.purged = now;
       }
     });
-    if (n || ph) { store.save('refs', refs); store.save('posts', posts); store.version(true); log(store, 'system', 'purge', n + ' names wiped, ' + ph + ' photos deleted'); }
+    if (n || ph || changed) { store.save('refs', refs); store.save('posts', posts); store.version(true); log(store, 'system', 'purge', n + ' names wiped, ' + ph + ' photos deleted'); }
     return {wiped: n, photos: ph};
   }
 
@@ -551,7 +560,7 @@ var CORE = (function () {
     return store.withLock(function () { var w = who(q, store); var r = fn(q, store, w.me, w.leader); r.ok = true; return r; });
   }
 
-  return {callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
+  return {PHOTO_DAYS: PHOTO_DAYS, callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
 })();
 
 /* ===== server/gas.js ===== */

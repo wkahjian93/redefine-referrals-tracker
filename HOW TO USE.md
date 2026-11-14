@@ -50,6 +50,8 @@
 |---|---|---|
 | Your name, the referred names, the count, the covered photo, comments | Age, phone, gender, remarks, the referring client's name | The original uncovered photo |
 
+**30 days after the leader approves a page**, its photos (the covered name list and the roadshow selfie) are deleted automatically to save space. The names and your call / appointment / close records stay.
+
 **After 3 months**, the phone number, age, gender, remarks, the referring client's name and the photo are deleted automatically. Only the referred names stay.
 
 ## For the leader
