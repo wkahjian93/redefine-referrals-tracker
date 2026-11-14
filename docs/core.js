@@ -502,7 +502,7 @@ var CORE = (function () {
     store.save('devices', store.load('devices').filter(function (d) { return !(d.agentId === me.id && (!t || d.token === t)); }));
     return {off: true};
   }
-  function pushTest(q, store, me) { store.push([me.id], {title: 'REDEFINE Referrals 🔔', body: 'Pop-ups are working on this phone.', tag: 'test', url: '#/me'}); return {sent: true}; }
+  function pushTest(q, store, me) { store.push([me.id], {title: 'REDEFINE Prospecting 🔔', body: 'Pop-ups are working on this phone.', tag: 'test', url: '#/me'}); return {sent: true}; }
 
   /* Every morning: each agent with names not yet called for 7+ days gets one lock-screen reminder.
      After 14 days without a call the lead bonus is forfeited. Returns how many agents were reminded. */
@@ -561,7 +561,7 @@ var CORE = (function () {
     if (q.op === 'pushtest' && q.delay) {   // "test in 15 s": wait OUTSIDE the lock so nobody else is blocked
       var w1 = store.withLock(function () { return who(q, store).me; });
       if (store.sleep) store.sleep(Math.max(1, Math.min(20, +q.delay || 15)) * 1000);
-      store.push([w1.id], {title: 'REDEFINE Referrals 🔔', body: 'Pop-ups work even when the phone is locked. 👍', tag: 'test', url: '#/me'});
+      store.push([w1.id], {title: 'REDEFINE Prospecting 🔔', body: 'Pop-ups work even when the phone is locked. 👍', tag: 'test', url: '#/me'});
       return {ok: true, sent: true};
     }
     if (q.op === 'read') {   // count the reading under the lock, but call the AI outside it (it can take 20 s)

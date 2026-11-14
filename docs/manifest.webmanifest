@@ -1,6 +1,6 @@
 {
-  "name": "REDEFINE Referrals Tracker",
-  "short_name": "Referrals",
+  "name": "REDEFINE Prospecting",
+  "short_name": "Prospecting",
   "description": "Snap your referral page. The app counts it, hides client privacy and the team cheers you on.",
   "start_url": "./",
   "scope": "./",

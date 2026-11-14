@@ -1,7 +1,7 @@
 // Network first and always revalidated, so phones get updates as soon as they are online; falls back to the cache offline.
 // Also shows the lock-screen pop-ups that arrive from the server (Firebase Cloud Messaging) - by itself, without the
 // Firebase library, so it works the same on Android and iPhone and even when the app is closed (same as REDEFINE Calendar).
-const CACHE = 'referrals-v10';
+const CACHE = 'referrals-v11';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'sound.js', 'redact.js', 'core.js', 'config.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
 const IOS = /iphone|ipad|ipod|macintosh/i.test(self.navigator.userAgent) && /safari/i.test(self.navigator.userAgent) && !/chrome|crios|android/i.test(self.navigator.userAgent);
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).catch(() => {})); });
@@ -23,7 +23,7 @@ self.addEventListener('push', e => {
   let p = {};
   try { p = e.data ? e.data.json() : {}; } catch (x) { p = {data: {body: e.data ? e.data.text() : ''}}; }
   const n = p.notification || {}, d = p.data || {};
-  const msg = {title: n.title || d.title || 'REDEFINE Referrals', body: n.body || d.body || '', url: d.url || '#/', tag: n.tag || d.tag || ''};
+  const msg = {title: n.title || d.title || 'REDEFINE Prospecting', body: n.body || d.body || '', url: d.url || '#/', tag: n.tag || d.tag || ''};
   e.waitUntil(self.clients.matchAll({type: 'window', includeUncontrolled: true}).then(list => {
     const visible = list.filter(c => c.visibilityState === 'visible');
     visible.forEach(c => c.postMessage({rrtPush: msg}));

@@ -11,7 +11,7 @@
    (only the covered/censored photos). Both are created by setup(), which also installs the daily auto-delete. */
 
 function reply(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
-function doGet() { return reply({ok: true, app: 'REDEFINE Referrals Tracker'}); }
+function doGet() { return reply({ok: true, app: 'REDEFINE Prospecting'}); }
 
 function doPost(e) {
   try {

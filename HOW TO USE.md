@@ -1,4 +1,4 @@
-# REDEFINE Referrals Tracker — how to use
+# REDEFINE Prospecting — how to use
 
 **The problem it fixes:** agents don't report their referrals because typing them up is *mafan*, so you can't count them or pay the bonus fairly.
 **How:** the agent takes one photo of the referral book page. The app reads and counts the names, hides client privacy, posts it to the team board, cheers the agent on, and keeps the count for bonus. The agent types nothing.

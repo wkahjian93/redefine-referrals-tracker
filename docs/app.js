@@ -1,4 +1,4 @@
-/* REDEFINE Referrals Tracker - phone app */
+/* REDEFINE Prospecting (was REDEFINE Referrals Tracker) - phone app */
 (function () {
   'use strict';
   var CFG = window.RRT_CONFIG || {};
@@ -88,9 +88,9 @@
 
   /* ---------- WhatsApp share ---------- */
   function shareText(p) {
-    var a = agent(p.agentId), link = (CFG.appUrl || location.href.split('#')[0]) + '#/post/' + p.id, month = teamMonthTotal();
+    var a = agent(p.agentId), link = (CFG.appUrl || location.href.split('#')[0]) + (p.id ? '#/post/' + p.id : ''), month = teamMonthTotal();
     var line = p.kind === 'milestone' ? '🏆 ' + p.text : p.source === 'roadshow' ? '🎪 ' + a.name + ' collected ' + p.count + ' name' + (p.count === 1 ? '' : 's') + ' at the roadshow in ' + p.location + '!' : '🎉 ' + a.name + ' just collected ' + p.count + ' referral' + (p.count === 1 ? '' : 's') + '!';
-    return ['📣 *REDEFINE Referrals Tracker*', '', line, 'Team total this month: ' + month + ' referrals 💪', '', 'Hardwork on purpose. No magic, just basic.', '👉 See it & cheer in the app: ' + link].join('\n');
+    return ['📣 *REDEFINE Prospecting*', '', line, 'Team total this month: ' + month + ' names 💪', '', 'Hardwork on purpose. No magic, just basic.', '👉 See it & cheer in the app: ' + link].join('\n');
   }
   function shareWhatsApp(p) {
     modal('<h2>Share to WhatsApp group</h2><div class="faint">No client names or numbers are included. You can edit the text. WhatsApp will ask you to pick the group.</div>' +
@@ -264,7 +264,7 @@
     var body = (views[v] || viewFeed)();
     $app.innerHTML = (CFG.sample ? '<div class="sample-bar">' + esc(CFG.sample) + '</div>' : '') +
       (S.offline ? '<div class="sample-bar" style="background:#6B6A66;color:#fff">No signal · showing what was saved on this phone</div>' : '') +
-      '<header class="top"><div class="wrap"><div class="brand"><img src="icons/icon-192.png" alt=""><div><b>REDEFINE <span>Referrals</span></b><small>' + esc(teamMonthTotal()) + ' team referrals this month</small></div></div>' +
+      '<header class="top"><div class="wrap"><div class="brand"><img src="icons/icon-192.png" alt=""><div><b>REDEFINE <span>Prospecting</span></b><small>' + esc(teamMonthTotal()) + ' team prospects this month</small></div></div>' +
       '<button class="icon-btn' + (S.music ? ' on' : '') + '" id="music" aria-label="Background music" title="Background music">♪</button></div></header>' +
       '<main><div class="wrap" id="view"></div></main>' + tabsHtml();
     var view = document.getElementById('view');
@@ -295,7 +295,7 @@
   function renderSignIn() {
     var last = LS.get('lastName', '');
     $app.innerHTML = '<div class="signin"><div class="box"><img class="logo" src="icons/icon-192.png" alt="">' +
-      '<h1>REDEFINE <span>Referrals</span></h1><p>Snap your referral page. The app counts it, hides client privacy, and the whole team cheers you on.</p>' +
+      '<h1>REDEFINE <span>Prospecting</span></h1><p>Snap your referral page or roadshow list. The app counts it, hides client privacy, and the whole team cheers you on.</p>' +
       '<label class="field"><span>Team code (from your leader)</span><input id="si-code" autocomplete="off" autocapitalize="off"></label>' +
       '<label class="field"><span>Your name (as the team knows you)</span><input id="si-name" value="' + esc(last) + '" autocomplete="name"></label>' +
       '<label class="field"><span>Your PIN (4–6 digits; new members choose one now)</span><input id="si-pin" inputmode="numeric" type="password" maxlength="6"></label>' +
@@ -399,12 +399,12 @@
   function viewFeed() {
     var posts = S.data.posts.filter(function (p) { return p.kind !== 'approach'; }).sort(function (a, b) { return a.created < b.created ? 1 : -1; });
     var mine = S.data.refs.filter(function (r) { return r.agentId === S.data.me.id && r.status !== 'rejected' && monthKey(r.created) === monthKey(new Date().toISOString()); }).length;
-    var head = remindersHtml() + '<div class="card"><div class="row"><div class="grow"><div class="faint">Your referrals this month</div><div class="big-num">' + mine + '</div></div>' +
+    var head = sendingHtml() + remindersHtml() + '<div class="card"><div class="row"><div class="grow"><div class="faint">Your new prospects this month</div><div class="big-num">' + mine + '</div></div>' +
       '<a class="btn gold" href="#/snap">📷 Snap new prospect</a></div></div>';
     if (!posts.length) return head + '<div class="empty">No referral updates yet. Be the first on the board!</div>';
     return head + posts.slice(0, 80).map(function (p) { return postCard(p, false); }).join('');
   }
-  viewFeed.wire = wirePosts;
+  viewFeed.wire = function (root) { wirePosts(root); wireSending(root); };
   function viewPost() {
     var p = S.data.posts.filter(function (x) { return x.id === route.arg; })[0];
     if (!p) return '<div class="empty">This post was removed.<br><br><a href="#/feed">Back to feed</a></div>';
@@ -702,29 +702,68 @@
       d.stage = 'review'; render();
     }).catch(function (e) { d.stage = 'failed'; d.error = errText(e); render(); });
   }
+  /* Posting feels instant: celebrate right away, upload in the background (a few seconds to Google).
+     A card on the Feed shows "Posting…"; if the upload fails it turns red with Retry, so nothing is lost. */
   function postDraft() {
     var d = S.draft, rows = d.rows.filter(function (r) { return r.name.trim().length >= 2; });
     var rsd = d.source === 'roadshow';
     if (rsd && (!d.location || d.location.trim().length < 3)) return toast('Location needed', 'Type where the roadshow was.');
     confirmBox('Post ' + rows.length + (rsd ? ' roadshow name' : ' referral') + (rows.length === 1 ? '' : 's') + '?', (rsd && !d.selfie ? '<b>No selfie yet:</b> add it later from your post so your leader can approve.<br>' : '') + 'Your team will see your name, ' + (rsd ? 'the roadshow place, ' + (d.selfie ? 'your selfie, ' : '') : '') + 'the names and the covered photo. Phone numbers, ages and remarks stay private and auto-delete in 3 months.', 'Post it').then(function (y) {
       if (!y) return;
-      var out = REDACT.render(d.canvas, d.boxes), small = REDACT.toCanvas(out, 1280);
-      d.stage = 'busy'; d.msg = 'Posting…'; d.steps = []; render();
-      var extra = rsd ? {source: 'roadshow', location: d.location.trim(), selfie: d.selfie ? selfieB64(d.selfie) : ''} : {};
-      api('post', Object.assign({giver: d.giver, rows: rows, photo: REDACT.b64(small, 0.8), covered: true}, extra)).then(function (r) {
-        if (rsd) { var pl = LS.get('rsPlaces', []).filter(function (x) { return x !== extra.location; }); pl.unshift(extra.location); LS.set('rsPlaces', pl.slice(0, 8)); }
-        S.photos[r.post.id] = null; S.draft = null; S.snapMode = null; S.rs = null;
-        return refresh(true).then(function () { showCheer(r); });
-      }).catch(function (e) { d.stage = 'review'; render(); toast('Not posted', errText(e)); });
+      var small = REDACT.toCanvas(REDACT.render(d.canvas, d.boxes), 1280);
+      var payload = Object.assign({giver: d.giver, rows: rows, photo: REDACT.b64(small, 0.8), covered: true}, rsd ? {source: 'roadshow', location: d.location.trim(), selfie: d.selfie ? selfieB64(d.selfie) : ''} : {});
+      if (rsd) { var pl = LS.get('rsPlaces', []).filter(function (x) { return x !== payload.location; }); pl.unshift(payload.location); LS.set('rsPlaces', pl.slice(0, 8)); }
+      S.draft = null; S.snapMode = null; S.rs = null;
+      var job = {payload: payload, n: rows.length, source: rsd ? 'roadshow' : 'referral', location: payload.location || '', state: 'sending'};
+      (S.sending = S.sending || []).push(job);
+      showCheer(localCheer(job));
+      sendJob(job);
     });
   }
+  function localCheer(job) {
+    var mk = monthKey(new Date().toISOString()), me = S.data.me.id;
+    var mine = S.data.refs.filter(function (r) { return r.agentId === me && r.status !== 'rejected' && monthKey(r.created) === mk; }).length + job.n;
+    var pick = function (l) { return l[Math.floor(Math.random() * l.length)]; };
+    var line = job.source === 'roadshow' ? pick([job.n + ' names from the roadshow at ' + job.location + '! Standing there all day paid off. 💪', job.n + ' new contacts from ' + job.location + '. Call them while they still remember your booth! 📞'])
+      : job.n >= 3 ? pick([job.n + ' names from one page, that is trust earned. 客户愿意介绍，是对你最大的肯定。', job.n + ' referrals in one go! Your client believes in you.'])
+      : pick(['Every name is a family you can protect. Keep asking, 坚持就是力量。', 'One more door opened. No magic, just basic.']);
+    return {post: {id: '', kind: 'referral', agentId: me, count: job.n, source: job.source, location: job.location}, monthTotal: mine, cheer: [line], milestone: 0};
+  }
+  function sendJob(job) {
+    job.state = 'sending'; job.error = ''; if (route.current === 'feed') render();
+    api('post', job.payload).then(function (r) {
+      S.sending = (S.sending || []).filter(function (x) { return x !== job; });
+      if (r.milestone) toast('🏆 Milestone!', r.milestone + ' names this month. The team has been told.');
+      return refresh(true).then(function () { if (route.current === 'feed') render(); });
+    }).catch(function (e) {
+      job.state = 'failed'; job.error = errText(e); render();
+      toast('Not posted yet', 'Tap Retry on the Feed. Your photo is still here.');
+    });
+  }
+  function sendingHtml() {
+    return (S.sending || []).map(function (job, k) {
+      var what = job.n + (job.source === 'roadshow' ? ' roadshow name' : ' referral') + (job.n === 1 ? '' : 's') + (job.location ? ' · ' + job.location : '');
+      return job.state === 'failed'
+        ? '<div class="card" style="border-color:var(--bad)"><div class="row"><div style="font-size:22px">⚠️</div><div class="grow"><b>Not posted yet: ' + esc(what) + '</b><div class="faint">' + esc(job.error) + '</div></div></div><div class="actions"><button class="btn sm gold" data-retry="' + k + '">Retry</button><button class="btn sm danger" data-discard="' + k + '">Discard</button></div></div>'
+        : '<div class="card row" style="padding:11px 14px"><div class="spinner" style="width:22px;height:22px;border-width:3px;margin:0"></div><div class="grow"><b>Posting ' + esc(what) + '…</b><div class="faint">Keep the app open for a few seconds.</div></div></div>';
+    }).join('');
+  }
+  function wireSending(root) {
+    root.querySelectorAll('[data-retry]').forEach(function (b) { b.onclick = function () { sendJob(S.sending[+b.dataset.retry]); }; });
+    root.querySelectorAll('[data-discard]').forEach(function (b) {
+      b.onclick = function () {
+        confirmBox('Discard this post?', 'The photo and names you snapped will be thrown away. This cannot be undone.', 'Discard', true).then(function (y) { if (y) { S.sending.splice(+b.dataset.discard, 1); render(); } });
+      };
+    });
+  }
+  window.addEventListener('beforeunload', function (e) { if ((S.sending || []).some(function (j) { return j.state === 'sending'; })) { e.preventDefault(); e.returnValue = ''; } });
   function showCheer(r) {
     if (location.hash !== '#/feed') { route.keepModal = true; location.hash = '#/feed'; }
     if (S.sounds) SOUND.cheer(); confetti();
-    var p = S.data.posts.filter(function (x) { return x.id === r.post.id; })[0] || r.post;
+    var p = (r.post.id && S.data.posts.filter(function (x) { return x.id === r.post.id; })[0]) || r.post;
     modal('<div class="cheer"><div class="num">+' + r.post.count + '</div><div class="faint">' + (r.post.source === 'roadshow' ? 'roadshow name' : 'referral') + (r.post.count === 1 ? '' : 's') + ' added · ' + r.monthTotal + ' names this month</div>' +
       r.cheer.map(function (c) { return '<div class="msg-c">' + esc(c) + '</div>'; }).join('') +
-      (r.milestone ? '<div class="notice good">🏆 Milestone: ' + r.milestone + ' referrals this month! The team has been told.</div>' : '') +
+      (r.milestone ? '<div class="notice good">🏆 Milestone: ' + r.milestone + ' names this month! The team has been told.</div>' : '') +
       '<div class="faint">Waiting for leader approval to count for bonus.</div></div><div class="btns"><button class="btn" data-n>Done</button><button class="btn wa" data-y>Share to WhatsApp</button></div>', function (m, close) {
       m.querySelector('[data-n]').onclick = close;
       m.querySelector('[data-y]').onclick = function () { close(); shareWhatsApp(p); };
@@ -972,7 +1011,7 @@
     var today = myt(new Date().toISOString()).toISOString().slice(0, 10), shown = LS.get('remShown', {}), any = false;
     reminders().forEach(function (r) {
       if (shown[r.id] === today) return; shown[r.id] = today; any = true;
-      toast('Reminder', r.text, null, r.go); notifyPhone('REDEFINE Referrals reminder', r.text, r.go);
+      toast('Reminder', r.text, null, r.go); notifyPhone('REDEFINE Prospecting reminder', r.text, r.go);
     });
     if (any) LS.set('remShown', shown);
   }
