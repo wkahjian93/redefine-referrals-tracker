@@ -157,6 +157,9 @@ var GAS = (function () {
 /* Runs every morning at 9am (installed by setup): lock-screen reminder to call referrals waiting 7+ days (bonus forfeits at 14). */
 function dailyCallReminder() { var r = GAS.withLock(function () { return CORE.callReminders(GAS); }); GAS.flushPush(); console.log('Call reminders: ' + r.reminded + ' agent(s)'); }
 
+/* Runs on the 5th of every month at 9am (installed by setup): last month's report + pay reminder to the leader(s). */
+function monthlyReport() { var r = GAS.withLock(function () { return CORE.monthlyReport(GAS); }); GAS.flushPush(); console.log('Monthly report ' + r.month + ': RM' + r.total + ' to ' + r.agents + ' agent(s), sent to ' + r.sent + ' leader(s)'); }
+
 function dailyPurge() { GAS.withLock(function () { var r = CORE.purge(GAS); console.log('Auto-delete: ' + r.wiped + ' names wiped, ' + r.photos + ' photos deleted'); }); }
 
 /* Run once from the editor: creates the Sheet and Drive folder, asks for permissions, installs the 2am auto-delete. */
@@ -164,7 +167,8 @@ function setup() {
   Object.keys(CORE.TABLES).forEach(function (t) { GAS.load(t); });
   DriveApp.getRootFolder();
   UrlFetchApp.fetch('https://api.openai.com/v1/models', {muteHttpExceptions: true});
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'dailyPurge' || t.getHandlerFunction() === 'dailyCallReminder') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'dailyPurge' || t.getHandlerFunction() === 'dailyCallReminder' || t.getHandlerFunction() === 'monthlyReport') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('monthlyReport').timeBased().onMonthDay(5).atHour(9).inTimezone('Asia/Kuala_Lumpur').create();
   ScriptApp.newTrigger('dailyCallReminder').timeBased().atHour(9).everyDays(1).inTimezone('Asia/Kuala_Lumpur').create();
   ScriptApp.newTrigger('dailyPurge').timeBased().atHour(2).everyDays(1).inTimezone('Asia/Kuala_Lumpur').create();
   var P = PropertiesService.getScriptProperties();

@@ -934,7 +934,8 @@
     if (paid && me.leader && paid.total !== sum('total')) html += '<div class="notice warn">Numbers changed after you marked it paid (paid RM' + paid.total + ', now RM' + sum('total') + '). Check late approvals.</div>';
     if (me.leader) html += '<div class="actions"><button class="btn sm" id="bn-csv">Download spreadsheet (CSV)</button>' +
       (paid ? '<button class="btn sm danger" id="bn-unpaid">Undo paid</button>' : '<button class="btn sm primary" id="bn-paid">Mark ' + monthName(mk) + ' as paid</button>') +
-      '<button class="btn sm wa" id="bn-remind">Remind team on WhatsApp</button></div>';
+      '<button class="btn sm wa" id="bn-report">📊 Share ' + monthName(mk) + ' report to WhatsApp</button><button class="btn sm wa" id="bn-remind">Remind team on WhatsApp</button></div>' +
+      (!paid && mk < curMonth() ? '<div class="notice warn" style="margin-top:8px">💰 Reminder: pay each agent the amount in the Total column, then tap <b>Mark ' + monthName(mk) + ' as paid</b> so they see it.</div>' : '');
     return html + '</div>';
   }
   viewBonus.wire = function (root) {
@@ -957,7 +958,31 @@
       confirmBox('Undo paid?', monthName(mk) + ' will show as not paid again.', 'Undo', true).then(function (y) { if (y) api('markPaid', {month: mk, confirm: true, undo: true}).then(function () { return refresh(true); }).catch(function (e) { toast('Not saved', errText(e)); }); });
     };
     if (q('#bn-remind')) q('#bn-remind').onclick = function () { remindWhatsApp(); };
+    if (q('#bn-report')) q('#bn-report').onclick = function () { reportWhatsApp(mk); };
   };
+  /* Monthly report for the team WhatsApp group (the leader can edit it before sending) */
+  function reportWhatsApp(mk) {
+    var R = S.data.rates, rows = CORE.bonusTable(S.data.agents, S.data.posts, S.data.refs, mk, R);
+    var refs = S.data.refs.filter(function (r) { return r.status !== 'rejected' && monthKey(r.created) === mk; });
+    var rs = refs.filter(function (r) { return r.source === 'roadshow'; }).length, sum = function (k) { return rows.reduce(function (t, x) { return t + x[k]; }, 0); };
+    var forfeit = sum('leadsForfeit'), paid = (S.data.paid || {})[mk];
+    var top = rows.map(function (x) { return {name: x.name, n: x.leads + x.leadsToCall + x.leadsWaiting + x.leadsForfeit}; }).sort(function (a, b) { return b.n - a.n; })[0];
+    var earners = rows.filter(function (x) { return x.total; }).sort(function (a, b) { return b.total - a.total; });
+    var link = CFG.appUrl || location.href.split('#')[0];
+    var lines = ['📊 *REDEFINE Prospecting · ' + monthName(mk) + ' Report*', '',
+      '👥 Team: ' + refs.length + ' new names' + (rs ? ' (🎪 ' + rs + ' from roadshows)' : '') + ' · ☕ ' + sum('appt') + ' appointments · 🎯 ' + sum('close') + ' closes',
+      top && top.n ? '🏆 Top prospector: ' + top.name + ' (' + top.n + ' names)' : '', '',
+      '💰 *Bonus* (Lead RM' + R.lead + ' · Appt RM' + R.appt + ' · Close RM' + R.close + ')'].filter(function (l, i) { return l !== '' || i !== 3; });
+    earners.forEach(function (x, i) { lines.push((i + 1) + '. ' + x.name + ' — ' + x.leads + ' leads / ' + x.appt + ' appt / ' + x.close + ' close → *RM' + x.total + '*'); });
+    if (!earners.length) lines.push('No approved bonus this month yet.');
+    lines.push('*Total: RM' + sum('total') + '*' + (paid ? ' · paid ✅' : ''));
+    if (forfeit) lines.push('', '⛔ ' + forfeit + ' name' + (forfeit === 1 ? ' was' : 's were') + ' not called within ' + (S.data.callDays || 14) + ' days. Call early, keep your bonus! 📞');
+    lines.push('', 'Hardwork on purpose. No magic, just basic. 💪', '👉 ' + link);
+    modal('<h2>📊 ' + monthName(mk) + ' report</h2><div class="faint">Everyone in the group will see each agent\'s bonus. Edit if you like; WhatsApp will ask you to pick the group.</div><textarea id="wa-text" style="min-height:240px">' + esc(lines.join('\n')) + '</textarea><div class="btns"><button class="btn" data-n>Cancel</button><button class="btn wa" data-y>Open WhatsApp</button></div>', function (m, close) {
+      m.querySelector('[data-n]').onclick = close;
+      m.querySelector('[data-y]').onclick = function () { var t = m.querySelector('#wa-text').value; close(); window.location.href = 'https://wa.me/?text=' + encodeURIComponent(t); };
+    });
+  }
   function remindWhatsApp() {
     var cm = curMonth(), rows = CORE.bonusTable(S.data.agents, S.data.posts, S.data.refs, cm, S.data.rates);
     var none = rows.filter(function (x) { return !x.approach; }).map(function (x) { return x.name; });
@@ -998,7 +1023,7 @@
       if (pages.length || steps) out.push({id: 'approve', icon: '✅', text: (pages.length ? pages.length + ' page' + (pages.length === 1 ? '' : 's') : '') + (pages.length && steps ? ' and ' : '') + (steps ? steps + ' appointment/close update' + (steps === 1 ? '' : 's') : '') + ' waiting for your approval.', go: pages.length ? '#/review/' + pages[pages.length - 1].id : '#/steps'});
       if (!paid && dom <= 10) {
         var t = CORE.bonusTable(S.data.agents, S.data.posts, S.data.refs, lm, S.data.rates), tot = t.reduce(function (s, x) { return s + x.total; }, 0);
-        if (tot) out.push({id: 'pay', icon: '💰', text: monthName(lm) + ' bonus is ready: RM' + tot.toFixed(2) + ' for ' + t.filter(function (x) { return x.total; }).length + ' agents. Pay, then mark as paid.', go: '#/bonus/' + lm});
+        if (tot) out.push({id: 'pay', icon: '💰', text: monthName(lm) + ' bonus is ready: RM' + tot.toFixed(2) + ' for ' + t.filter(function (x) { return x.total; }).length + ' agents. Share the report to WhatsApp, pay, then mark as paid.', go: '#/bonus/' + lm});
       }
       if (left <= 5) out.push({id: 'remind', icon: '📣', text: 'Month closes in ' + left + ' day' + (left === 1 ? '' : 's') + '. Send the team a WhatsApp reminder.', go: '#/bonus'});
     }

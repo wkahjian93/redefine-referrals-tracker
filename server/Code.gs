@@ -530,6 +530,24 @@ var CORE = (function () {
     return {reminded: n};
   }
 
+  /* Monthly report (trigger on the 5th, 9am): every leader gets a lock-screen pop-up with last month's bonus total,
+     opening the bonus sheet where they share the report to the WhatsApp group and mark it paid. */
+  function monthlyReport(store) {
+    var now = store.now(), m = myt(now.toISOString()).slice(0, 7).split('-'), d = new Date(Date.UTC(+m[0], +m[1] - 2, 1));
+    var month = d.toISOString().slice(0, 7), names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], label = names[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+    var agents = store.load('agents').filter(function (a) { return String(a.active) !== 'false'; });
+    var rows = bonusTable(agents, store.load('posts'), store.load('refs'), month, rates(store), now.toISOString());
+    var total = 0, paidAgents = 0, names_ = 0, waiting = 0;
+    rows.forEach(function (x) { total += x.total; if (x.total) paidAgents++; names_ += x.leads + x.leadsToCall + x.leadsWaiting + x.leadsForfeit; waiting += x.leadsWaiting + x.apptWaiting + x.closeWaiting; });
+    var paid = setting(store, 'paid_' + month), leaders = agents.filter(function (a) { return a.role === 'leader'; }).map(function (a) { return a.id; });
+    if (!leaders.length) return {month: month, sent: 0};
+    store.push(leaders, {title: '📊 ' + label + ' prospecting report' + (paid ? ' (paid ✅)' : ''),
+      body: names_ + ' names · bonus RM' + total + ' for ' + paidAgents + ' agent' + (paidAgents === 1 ? '' : 's') + '. ' + (paid ? 'Tap to view and share to WhatsApp.' : 'Tap to view, share to WhatsApp, then pay and mark as paid.') + (waiting ? ' ' + waiting + ' item(s) still waiting your approval.' : ''),
+      url: '#/bonus/' + month, tag: 'monthly-' + month});
+    log(store, 'system', 'monthly_report', month + ' RM' + total);
+    return {month: month, total: total, agents: paidAgents, sent: leaders.length};
+  }
+
   /* ---------- 3-month auto-delete (daily trigger) ---------- */
   function purge(store) {
     var refs = store.load('refs'), posts = store.load('posts'), now = nowIso(store), n = 0, ph = 0, changed = false;
@@ -576,7 +594,7 @@ var CORE = (function () {
     return store.withLock(function () { var w = who(q, store); var r = fn(q, store, w.me, w.leader); r.ok = true; return r; });
   }
 
-  return {PHOTO_DAYS: PHOTO_DAYS, callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
+  return {monthlyReport: monthlyReport, PHOTO_DAYS: PHOTO_DAYS, callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
 })();
 
 /* ===== server/gas.js ===== */
@@ -739,6 +757,9 @@ var GAS = (function () {
 /* Runs every morning at 9am (installed by setup): lock-screen reminder to call referrals waiting 7+ days (bonus forfeits at 14). */
 function dailyCallReminder() { var r = GAS.withLock(function () { return CORE.callReminders(GAS); }); GAS.flushPush(); console.log('Call reminders: ' + r.reminded + ' agent(s)'); }
 
+/* Runs on the 5th of every month at 9am (installed by setup): last month's report + pay reminder to the leader(s). */
+function monthlyReport() { var r = GAS.withLock(function () { return CORE.monthlyReport(GAS); }); GAS.flushPush(); console.log('Monthly report ' + r.month + ': RM' + r.total + ' to ' + r.agents + ' agent(s), sent to ' + r.sent + ' leader(s)'); }
+
 function dailyPurge() { GAS.withLock(function () { var r = CORE.purge(GAS); console.log('Auto-delete: ' + r.wiped + ' names wiped, ' + r.photos + ' photos deleted'); }); }
 
 /* Run once from the editor: creates the Sheet and Drive folder, asks for permissions, installs the 2am auto-delete. */
@@ -746,7 +767,8 @@ function setup() {
   Object.keys(CORE.TABLES).forEach(function (t) { GAS.load(t); });
   DriveApp.getRootFolder();
   UrlFetchApp.fetch('https://api.openai.com/v1/models', {muteHttpExceptions: true});
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'dailyPurge' || t.getHandlerFunction() === 'dailyCallReminder') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'dailyPurge' || t.getHandlerFunction() === 'dailyCallReminder' || t.getHandlerFunction() === 'monthlyReport') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('monthlyReport').timeBased().onMonthDay(5).atHour(9).inTimezone('Asia/Kuala_Lumpur').create();
   ScriptApp.newTrigger('dailyCallReminder').timeBased().atHour(9).everyDays(1).inTimezone('Asia/Kuala_Lumpur').create();
   ScriptApp.newTrigger('dailyPurge').timeBased().atHour(2).everyDays(1).inTimezone('Asia/Kuala_Lumpur').create();
   var P = PropertiesService.getScriptProperties();

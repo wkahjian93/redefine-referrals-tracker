@@ -234,6 +234,23 @@ const sy4 = c4(Object.assign({op: 'sync'}, ag4)).posts.find(p => p.id === pp4.po
 ok(sy4.photo === 0 && sy4.selfie === 0 && sy4.photoRemoved, 'app is told the photo was removed');
 err(() => c4(Object.assign({op: 'photo', postId: pp4.post.id}, ld4)), 'photo_gone', 'removed photo no longer served');
 
+// monthly report on the 5th: pop-up to leaders about LAST month
+const s5 = memStore({now: () => Date.parse('2026-10-10T02:00:00Z')}), c5 = q => CORE.handle(q, s5);
+const a5 = {code: 'test-team', name: 'Report Agent', pin: '1212'}, l5 = {code: 'test-leader-code', name: 'Report Lead', pin: '3434'};
+c5(Object.assign({op: 'signin', create: true}, a5)); c5(Object.assign({op: 'signin', create: true}, l5));
+const p5 = c5(Object.assign({op: 'post', photo: PHOTO, covered: true, rows: [{name: 'Oct One'}, {name: 'Oct Two'}]}, a5));
+const r5 = s5.tables.refs.filter(r => r.postId === p5.post.id), d5 = {}; r5.forEach(r => { d5[r.id] = 'approved'; });
+c5(Object.assign({op: 'review', postId: p5.post.id, confirm: true, decisions: d5}, l5));
+r5.forEach(r => c5(Object.assign({op: 'step', refId: r.id, step: 'call'}, a5)));
+s5.setNow('2026-11-05T01:00:00Z'); s5.pushes.length = 0;
+const mr = CORE.monthlyReport(s5);
+ok(mr.month === '2026-10' && mr.total === 2 && mr.sent === 1, 'report is about last month: RM2, sent to the leader (' + JSON.stringify(mr) + ')');
+const lid = s5.tables.agents.find(a => a.name === 'Report Lead').id;
+ok(s5.pushes.length === 1 && s5.pushes[0].ids[0] === lid && /Oct 2026/.test(s5.pushes[0].note.title) && s5.pushes[0].note.url === '#/bonus/2026-10', 'pop-up goes only to the leader and opens the Oct bonus sheet');
+ok(/pay/.test(s5.pushes[0].note.body), 'reminds the leader to pay');
+c5(Object.assign({op: 'markPaid', month: '2026-10', confirm: true}, l5)); s5.pushes.length = 0; CORE.monthlyReport(s5);
+ok(/paid ✅/.test(s5.pushes[0].note.title), 'already-paid month says so');
+
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');
 call(Object.assign({op: 'removeAgent', agentId: meiAgent.id, confirm: true}, gm));

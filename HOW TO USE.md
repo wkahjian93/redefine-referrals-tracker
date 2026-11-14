@@ -61,6 +61,8 @@
 - **Board → Team referral bonus:** your monthly bonus sheet, in the same layout as before: Name · Approach · Leads Obtain (RM1) · Successful Appointment (RM5) · Close Case (RM20) · Total. Pick any of the last 12 months.
   - **Download spreadsheet (CSV)** for your records.
   - After you pay: **Mark [month] as paid**. Each agent sees their paid amount. If late approvals change a paid month, the app warns you.
+  - **📊 Share report to WhatsApp** writes the month's report for the group: team names (incl. roadshows), appointments, closes, top prospector, each agent's bonus and the total.
+  - **On the 5th of every month at 9am** you get a lock-screen pop-up with last month's total. Tap it → share the report → pay → **Mark as paid**.
   - **Remind team on WhatsApp** prepares a message with the rates, the days left and who hasn't posted this month.
 - **Your reminders** (top of Feed, pop-up once a day): items waiting approval; last month's bonus ready to pay (1st–10th) until you mark it paid; month closing in 5 days → send the WhatsApp reminder.
 - **Me → Leader settings:** the three rates (default RM1 / RM5 / RM20 from your sheet). Approach is counted, not paid.
