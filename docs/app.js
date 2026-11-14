@@ -397,7 +397,7 @@
     var posts = S.data.posts.filter(function (p) { return p.kind !== 'approach'; }).sort(function (a, b) { return a.created < b.created ? 1 : -1; });
     var mine = S.data.refs.filter(function (r) { return r.agentId === S.data.me.id && r.status !== 'rejected' && monthKey(r.created) === monthKey(new Date().toISOString()); }).length;
     var head = remindersHtml() + '<div class="card"><div class="row"><div class="grow"><div class="faint">Your referrals this month</div><div class="big-num">' + mine + '</div></div>' +
-      '<a class="btn gold" href="#/snap">📷 Snap referral page</a></div></div>';
+      '<a class="btn gold" href="#/snap">📷 Snap new prospect</a></div></div>';
     if (!posts.length) return head + '<div class="empty">No referral updates yet. Be the first on the board!</div>';
     return head + posts.slice(0, 80).map(function (p) { return postCard(p, false); }).join('');
   }
