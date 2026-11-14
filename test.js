@@ -181,7 +181,15 @@ const rina = {code: 'test-team', name: 'Rina Lim', pin: '3333'}, lead3 = {code: 
 c3(Object.assign({op: 'signin', create: true}, rina)); c3(Object.assign({op: 'signin', create: true}, lead3));
 const RS = n => Array.from({length: n}, (_, i) => ({name: 'Visitor ' + 'ABCDEFGHIJ'[i], phone: '01' + (2000000 + i * 1111) + '0'}));
 err(() => c3(Object.assign({op: 'post', source: 'roadshow', photo: PHOTO, covered: true, selfie: PHOTO, rows: RS(2)}, rina)), 'location_needed', 'roadshow needs a location');
-err(() => c3(Object.assign({op: 'post', source: 'roadshow', location: 'Queensbay Mall', photo: PHOTO, covered: true, rows: RS(2)}, rina)), 'selfie_needed', 'roadshow needs a selfie');
+const noSelfie = c3(Object.assign({op: 'post', source: 'roadshow', location: 'Penang Times Square', photo: PHOTO, covered: true, rows: RS(1)}, rina));
+ok(noSelfie.post.source === 'roadshow' && !noSelfie.post.selfieId, 'roadshow list can be posted before the selfie');
+const ns = s3.tables.refs.find(r => r.postId === noSelfie.post.id);
+err(() => c3(Object.assign({op: 'review', postId: noSelfie.post.id, confirm: true, decisions: {[ns.id]: 'approved'}}, lead3)), 'selfie_missing', 'leader cannot approve until the selfie is in');
+err(() => c3(Object.assign({op: 'addSelfie', postId: noSelfie.post.id, selfie: PHOTO}, lead3 === null ? rina : {code: 'test-team', name: 'Other Agent', pin: '7777', create: true})), 'new_name', 'stranger cannot add a selfie');
+s3.pushes.length = 0;
+ok(c3(Object.assign({op: 'addSelfie', postId: noSelfie.post.id, selfie: PHOTO}, rina)).selfie === 1, 'agent adds the booth selfie later');
+ok(s3.pushes.some(p => /Selfie added/.test(p.note.title)), 'leader is told the list is ready');
+ok(c3(Object.assign({op: 'review', postId: noSelfie.post.id, confirm: true, decisions: {[ns.id]: 'approved'}}, lead3)).status === 'approved', 'approve works once the selfie is in');
 const rp = c3(Object.assign({op: 'post', source: 'roadshow', location: 'Queensbay Mall', giver: 'should be ignored', photo: PHOTO, covered: true, selfie: PHOTO, rows: RS(6)}, rina));
 ok(rp.post.source === 'roadshow' && rp.post.location === 'Queensbay Mall' && rp.post.count === 6, 'roadshow list posted with location and 6 names');
 ok(rp.post.selfieId && s3.photos[rp.post.selfieId] && !rp.post.giver, 'selfie stored, no giver on roadshow');
@@ -195,7 +203,7 @@ c3(Object.assign({op: 'review', postId: rp.post.id, confirm: true, decisions: de
 ok(s3.pushes.some(p => /6 roadshow names approved/.test(p.note.title)), 'approval pop-up says roadshow names');
 c3(Object.assign({op: 'step', refId: rr[0].id, step: 'call'}, rina)); c3(Object.assign({op: 'step', refId: rr[1].id, step: 'appt'}, rina));
 const b3 = CORE.bonusTable(sy3.agents, s3.tables.posts, s3.tables.refs, '2026-11', {lead: 1, appt: 5, close: 20}, s3.now().toISOString()).find(x => x.name === 'Rina Lim');
-ok(b3.approach === 1 && b3.leads === 2 && b3.leadsRoadshow === 2 && b3.leadsToCall === 4 && b3.total === 2, 'roadshow names: RM1 each once called, same 14-day rule (' + JSON.stringify(b3) + ')');
+ok(b3.approach === 2 && b3.leads === 2 && b3.leadsRoadshow === 2 && b3.leadsToCall === 5 && b3.total === 2, 'roadshow names: RM1 each once called, same 14-day rule (' + JSON.stringify(b3) + ')');
 s3.setNow('2026-11-22T03:00:00Z');
 ok(CORE.callReminders(s3).reminded === 1, 'roadshow names get the same call reminders');
 const ref2 = c3(Object.assign({op: 'post', photo: PHOTO, covered: true, rows: [{name: 'Visitor A', phone: '0120000000'}]}, rina));

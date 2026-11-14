@@ -20,8 +20,8 @@
 
 **Got names at a roadshow?** Tap 📷 Snap → **🎪 Roadshow name list**:
 1. Type the **📍 roadshow location** (the app remembers places you used before).
-2. Take a **🤳 selfie at the booth** as proof. Your face stays visible; other people's faces are covered 🙂 automatically.
-3. Snap the **name list**. Everything after that is the same as a referral page: names counted, private details covered, leader approves, RM1 per name once you call within 14 days, ☕ appointment RM5, 🎯 close RM20.
+2. Snap the **name list**. Everything after that is the same as a referral page: names counted, private details covered, leader approves, RM1 per name once you call within 14 days, ☕ appointment RM5, 🎯 close RM20.
+3. **🤳 Selfie at the booth** as proof: take it now, or later from your post ("Add booth selfie"). Your face stays visible; other people's faces are covered 🙂. Your leader can approve only after the selfie is in, and gets a pop-up when you add it.
 
 **Asked but got no names?** Snap → **🙋 I asked a client but got no names**. It counts as an *Approach* (effort, not paid).
 

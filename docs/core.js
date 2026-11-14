@@ -192,7 +192,7 @@ var CORE = (function () {
     if (!b64ok(q.photo, MAX_PHOTO_B64)) fail('bad_photo');
     if (source === 'roadshow') {   // roadshow names need the place and a selfie there as proof
       if (location.length < 3) fail('location_needed');
-      if (!b64ok(q.selfie, MAX_PHOTO_B64)) fail('selfie_needed');
+      if (q.selfie && !b64ok(q.selfie, MAX_PHOTO_B64)) fail('bad_photo');   // the booth selfie can also be added later (addSelfie)
     }
     if (q.covered !== true) fail('privacy_not_confirmed');
     var rows = (Array.isArray(q.rows) ? q.rows : []).slice(0, MAX_ROWS).map(function (r) {
@@ -203,7 +203,7 @@ var CORE = (function () {
     var mk = monthKey(now), before = monthCounts(refs, mk), firstEver = !refs.some(function (r) { return r.agentId === me.id; });
     var p = {id: newId(store, 10), agentId: me.id, kind: 'referral', giver: source === 'roadshow' ? '' : str(q.giver, 60), text: str(q.text, 300),
       photoId: store.putPhoto((source === 'roadshow' ? 'roadshow_' : 'ref_') + now.slice(0, 10) + '_' + me.id + '.jpg', q.photo), count: rows.length, status: 'pending', created: now, purged: '',
-      source: source, location: source === 'roadshow' ? location : '', selfieId: source === 'roadshow' ? store.putPhoto('selfie_' + now.slice(0, 10) + '_' + me.id + '.jpg', q.selfie) : ''};
+      source: source, location: source === 'roadshow' ? location : '', selfieId: source === 'roadshow' && q.selfie ? store.putPhoto('selfie_' + now.slice(0, 10) + '_' + me.id + '.jpg', q.selfie) : ''};
     var live = refs.filter(function (r) { return !r.purged; });
     var added = rows.map(function (r) {
       var ph = normPhone(r.phone), dup = '';
@@ -289,6 +289,7 @@ var CORE = (function () {
     var p = posts.filter(function (x) { return x.id === q.postId && x.kind === 'referral'; })[0];
     if (!p) fail('not_found');
     var mine = refs.filter(function (r) { return r.postId === p.id; });
+    if (p.source === 'roadshow' && !p.selfieId && !p.purged && mine.some(function (r) { return decisions[r.id] === 'approved'; })) fail('selfie_missing');   // proof first
     mine.forEach(function (r) { var d = decisions[r.id]; if (d === 'approved' || d === 'rejected' || d === 'pending') r.status = d; });
     var s = mine.map(function (r) { return r.status; });
     p.status = s.every(function (x) { return x === 'approved'; }) ? 'approved' : s.every(function (x) { return x === 'rejected'; }) ? 'rejected'
@@ -300,6 +301,21 @@ var CORE = (function () {
     var ok = mine.filter(function (r) { return r.status === 'approved'; }).length, R = rates(store);
     if (ok && p.agentId !== me.id) store.push([p.agentId], {title: '💰 ' + ok + (p.source === 'roadshow' ? ' roadshow name' : ' referral') + (ok === 1 ? '' : 's') + ' approved', body: 'RM' + (ok * R.lead) + ' bonus once you call each one within ' + CALL_DAYS + ' days. 📞 Call them now!', url: '#/leads', tag: 'approved-' + p.id});
     return {status: p.status};
+  }
+
+  /* roadshow booth selfie added after posting */
+  function addSelfie(q, store, me, leader) {
+    if (!b64ok(q.selfie, MAX_PHOTO_B64)) fail('bad_photo');
+    var posts = store.load('posts'), p = posts.filter(function (x) { return x.id === q.postId; })[0];
+    if (!p || p.source !== 'roadshow') fail('not_found');
+    if (p.agentId !== me.id && !leader) fail('not_yours');
+    if (p.purged || p.photoRemoved) fail('photo_gone');
+    if (p.selfieId) { try { store.trashPhoto(p.selfieId); } catch (e) {} }
+    p.selfieId = store.putPhoto('selfie_' + nowIso(store).slice(0, 10) + '_' + p.agentId + '.jpg', q.selfie);
+    store.save('posts', posts); store.version(true); log(store, me.id, 'selfie', p.id);
+    var ldr = store.load('agents').filter(function (a) { return a.role === 'leader' && String(a.active) !== 'false' && a.id !== me.id; }).map(function (a) { return a.id; });
+    if (p.status === 'pending') store.push(ldr, {title: '🤳 Selfie added · ' + p.location, body: me.name + ' added the booth selfie. The roadshow list is ready for your approval.', url: '#/review/' + p.id, tag: 'selfie-' + p.id});
+    return {selfie: 1};
   }
 
   function removePost(q, store, me, leader) {
@@ -535,7 +551,7 @@ var CORE = (function () {
     return {wiped: n, photos: ph};
   }
 
-  var OPS = {pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
+  var OPS = {addSelfie: addSelfie, pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
 
   function handle(q, store) {
     if (!q || typeof q !== 'object') fail('bad_request');
