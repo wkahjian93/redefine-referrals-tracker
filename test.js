@@ -175,6 +175,35 @@ ok(s2.pushes.some(p => /locked/.test(p.note.body)), '15-second lock-screen test'
 c2(Object.assign({op: 'pushoff'}, bob));
 ok(c2(Object.assign({op: 'sync'}, bob)).me.devices === 0, 'pop-ups can be turned off');
 
+// roadshow name lists: same as referrals, plus location + selfie
+const s3 = memStore({now: () => Date.parse('2026-11-14T02:00:00Z')}), c3 = q => CORE.handle(q, s3);
+const rina = {code: 'test-team', name: 'Rina Lim', pin: '3333'}, lead3 = {code: 'test-leader-code', name: 'Lead Three', pin: '4444'};
+c3(Object.assign({op: 'signin', create: true}, rina)); c3(Object.assign({op: 'signin', create: true}, lead3));
+const RS = n => Array.from({length: n}, (_, i) => ({name: 'Visitor ' + 'ABCDEFGHIJ'[i], phone: '01' + (2000000 + i * 1111) + '0'}));
+err(() => c3(Object.assign({op: 'post', source: 'roadshow', photo: PHOTO, covered: true, selfie: PHOTO, rows: RS(2)}, rina)), 'location_needed', 'roadshow needs a location');
+err(() => c3(Object.assign({op: 'post', source: 'roadshow', location: 'Queensbay Mall', photo: PHOTO, covered: true, rows: RS(2)}, rina)), 'selfie_needed', 'roadshow needs a selfie');
+const rp = c3(Object.assign({op: 'post', source: 'roadshow', location: 'Queensbay Mall', giver: 'should be ignored', photo: PHOTO, covered: true, selfie: PHOTO, rows: RS(6)}, rina));
+ok(rp.post.source === 'roadshow' && rp.post.location === 'Queensbay Mall' && rp.post.count === 6, 'roadshow list posted with location and 6 names');
+ok(rp.post.selfieId && s3.photos[rp.post.selfieId] && !rp.post.giver, 'selfie stored, no giver on roadshow');
+ok(rp.cheer.some(t => /Queensbay Mall/.test(t)), 'roadshow encouragement mentions the place');
+ok(s3.tables.refs.filter(r => r.postId === rp.post.id).every(r => r.source === 'roadshow'), 'roadshow names marked as roadshow');
+const sy3 = c3(Object.assign({op: 'sync'}, lead3)), sp = sy3.posts.find(p => p.id === rp.post.id);
+ok(sp.source === 'roadshow' && sp.location === 'Queensbay Mall' && sp.selfie === 1, 'team sees roadshow badge, place and selfie flag');
+ok(c3(Object.assign({op: 'photo', postId: rp.post.id, which: 'selfie'}, lead3)).image === PHOTO, 'selfie can be opened');
+const rr = s3.tables.refs.filter(r => r.postId === rp.post.id), dec3 = {}; rr.forEach(r => { dec3[r.id] = 'approved'; });
+c3(Object.assign({op: 'review', postId: rp.post.id, confirm: true, decisions: dec3}, lead3));
+ok(s3.pushes.some(p => /6 roadshow names approved/.test(p.note.title)), 'approval pop-up says roadshow names');
+c3(Object.assign({op: 'step', refId: rr[0].id, step: 'call'}, rina)); c3(Object.assign({op: 'step', refId: rr[1].id, step: 'appt'}, rina));
+const b3 = CORE.bonusTable(sy3.agents, s3.tables.posts, s3.tables.refs, '2026-11', {lead: 1, appt: 5, close: 20}, s3.now().toISOString()).find(x => x.name === 'Rina Lim');
+ok(b3.approach === 1 && b3.leads === 2 && b3.leadsRoadshow === 2 && b3.leadsToCall === 4 && b3.total === 2, 'roadshow names: RM1 each once called, same 14-day rule (' + JSON.stringify(b3) + ')');
+s3.setNow('2026-11-22T03:00:00Z');
+ok(CORE.callReminders(s3).reminded === 1, 'roadshow names get the same call reminders');
+const ref2 = c3(Object.assign({op: 'post', photo: PHOTO, covered: true, rows: [{name: 'Visitor A', phone: '0120000000'}]}, rina));
+ok(s3.tables.refs.find(r => r.postId === ref2.post.id).dup, 'a referral already met at a roadshow is flagged as duplicate');
+s3.setNow('2027-02-15T03:00:00Z'); CORE.purge(s3);
+ok(!s3.photos[rp.post.selfieId] && !s3.tables.posts.find(p => p.id === rp.post.id).selfieId, 'selfie auto-deleted after 3 months too');
+ok(s3.tables.posts.find(p => p.id === rp.post.id).location === 'Queensbay Mall', 'roadshow place kept after 3 months');
+
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');
 call(Object.assign({op: 'removeAgent', agentId: meiAgent.id, confirm: true}, gm));

@@ -17,7 +17,7 @@
     server_not_set_up: 'The team server is not set up yet.', daily_limit: 'Daily photo limit reached. Try again tomorrow.', bad_photo: 'This photo could not be sent. Please retake it.',
     no_api_key: 'Photo reading is not switched on yet (leader: add the AI key).', bad_api_key: 'The AI key on the server is not working.', no_credit: 'The AI account has no credit left.',
     rate_limited: 'The AI is busy. Try again in a minute.', ai_unavailable: 'The AI could not be reached. Try again, or type the names yourself.', ai_bad_reply: 'The AI reply was unreadable. Try again, or type the names yourself.',
-    no_names: 'There are no names to post.', privacy_not_confirmed: 'Please tick the privacy check first.', photo_gone: 'This photo was auto-deleted (older than 3 months).',
+    no_names: 'There are no names to post.', location_needed: 'Please type the roadshow location.', selfie_needed: 'Please take a selfie at the roadshow as proof.', privacy_not_confirmed: 'Please tick the privacy check first.', photo_gone: 'This photo was auto-deleted (older than 3 months).',
     leader_only: 'Only the leader can do this.', not_yours: 'You can only change your own posts.', approved_ask_leader: 'This page is already approved. Ask your leader to remove it.',
     not_found: 'This item no longer exists.', appointment_first: 'Mark the appointment first, then the close.', already_marked: 'Already marked.',
     lead_not_counted: 'This lead was not counted, so it has no steps.', undo_close_first: 'Undo the close first.', undo_appt_first: 'Undo the appointment first.', bad_rate: 'Rates must be numbers (RM).', network: 'No connection. Check your internet and try again.', server_error: 'Server problem. Please try again.'
@@ -89,7 +89,7 @@
   /* ---------- WhatsApp share ---------- */
   function shareText(p) {
     var a = agent(p.agentId), link = (CFG.appUrl || location.href.split('#')[0]) + '#/post/' + p.id, month = teamMonthTotal();
-    var line = p.kind === 'milestone' ? '🏆 ' + p.text : '🎉 ' + a.name + ' just collected ' + p.count + ' referral' + (p.count === 1 ? '' : 's') + '!';
+    var line = p.kind === 'milestone' ? '🏆 ' + p.text : p.source === 'roadshow' ? '🎪 ' + a.name + ' collected ' + p.count + ' name' + (p.count === 1 ? '' : 's') + ' at the roadshow in ' + p.location + '!' : '🎉 ' + a.name + ' just collected ' + p.count + ' referral' + (p.count === 1 ? '' : 's') + '!';
     return ['📣 *REDEFINE Referrals Tracker*', '', line, 'Team total this month: ' + month + ' referrals 💪', '', 'Hardwork on purpose. No magic, just basic.', '👉 See it & cheer in the app: ' + link].join('\n');
   }
   function shareWhatsApp(p) {
@@ -347,13 +347,15 @@
       return '<span class="chip' + (r.dup && canSee ? ' dup' : '') + (r.status === 'rejected' ? ' rej' : '') + '" title="' + esc(r.dup || '') + '">' + esc(r.name) + (r.dup && canSee ? ' ⚠️' : '') + '</span>';
     }).join('');
     var statusTxt = {pending: 'Waiting approval', approved: 'Approved', partial: 'Partly approved', rejected: 'Not counted'}[p.status] || p.status;
+    var rsTag = p.source === 'roadshow' ? '<div class="notice info" style="margin:8px 0 0;padding:7px 10px">🎪 <b>Roadshow</b> · 📍 ' + esc(p.location) + '</div>' : '';
+    var selfie = p.source === 'roadshow' && p.selfie && !p.purged ? '<div class="photo-box" data-photo="' + p.id + '" data-which="selfie" style="max-width:220px">' + (S.photos[p.id + ':s'] ? '<img alt="Selfie at the roadshow" src="data:image/jpeg;base64,' + S.photos[p.id + ':s'] + '">' : 'Tap to load the selfie') + '</div>' : '';
     var photo = p.purged ? '<div class="photo-box">Photo and contact details auto-deleted after 3 months · names kept</div>'
       : p.photo ? '<div class="photo-box" data-photo="' + p.id + '">' + (S.photos[p.id] ? '<img alt="Referral page, private details covered" src="data:image/jpeg;base64,' + S.photos[p.id] + '">' : 'Tap to load the covered photo') + '</div>'
       : '<div class="photo-box">Sample post · no photo</div>';
     return '<div class="card" id="p-' + p.id + '"><div class="row">' + avatar(p.agentId) + '<div class="grow"><div class="name">' + esc(a.name) + '</div><div class="faint">' + ago(p.created) + (p.giver && canSee ? ' · from ' + esc(p.giver) : '') + '</div></div>' +
-      '<div style="text-align:right"><div class="big-num">' + p.count + '</div><div class="faint">referral' + (p.count === 1 ? '' : 's') + '</div></div></div>' +
+      '<div style="text-align:right"><div class="big-num">' + p.count + '</div><div class="faint">' + (p.source === 'roadshow' ? 'roadshow name' : 'referral') + (p.count === 1 ? '' : 's') + '</div></div></div>' + rsTag +
       '<div class="chips">' + chips + '</div><div class="row" style="margin-top:6px"><span class="pill ' + esc(p.status) + '">' + esc(statusTxt) + '</span>' +
-      (canSee && !p.purged ? '<span class="faint">Client details auto-delete ' + deleteDate(p.created, S.data.keepDays) + '</span>' : '') + '</div>' + photo +
+      (canSee && !p.purged ? '<span class="faint">Client details auto-delete ' + deleteDate(p.created, S.data.keepDays) + '</span>' : '') + '</div>' + selfie + photo +
       '<div class="actions"><button class="btn sm wa" data-share="' + p.id + '">Share to WhatsApp</button>' +
       (me.leader && p.status !== 'approved' ? '<a class="btn sm gold" href="#/review/' + p.id + '">Review</a>' : '') +
       (!full ? '<a class="btn sm" href="#/post/' + p.id + '">Details</a>' : '') +
@@ -375,8 +377,9 @@
     });
     var lazy = root.querySelectorAll('[data-photo]');
     var load = function (el) {
-      var id = el.dataset.photo; if (S.photos[id] || el.dataset.loading) return; el.dataset.loading = 1; el.textContent = 'Loading photo…';
-      api('photo', {postId: id}).then(function (r) { S.photos[id] = r.image; el.innerHTML = '<img alt="Referral page, private details covered" src="data:image/jpeg;base64,' + r.image + '">'; })
+      var id = el.dataset.photo, which = el.dataset.which || '', key = id + (which === 'selfie' ? ':s' : '');
+      if (S.photos[key] || el.dataset.loading) return; el.dataset.loading = 1; el.textContent = 'Loading photo…';
+      api('photo', {postId: id, which: which}).then(function (r) { S.photos[key] = r.image; el.innerHTML = '<img alt="' + (which ? 'Selfie at the roadshow' : 'Name list, private details covered') + '" src="data:image/jpeg;base64,' + r.image + '">'; })
         .catch(function (e) { el.textContent = errText(e); delete el.dataset.loading; });
     };
     lazy.forEach(function (el) { el.onclick = function () { load(el); }; });
@@ -465,7 +468,7 @@
     var bonusSum = myBonus.reduce(function (s, x) { return s + x.total; }, 0);
     html += '<a href="#/bonus" class="card row" style="text-decoration:none;color:inherit"><div class="grow"><b>' + (me.leader ? 'Team referral bonus · ' : 'Your referral bonus · ') + monthName(curMonth()) + '</b><div class="faint">Approach · Leads RM' + S.data.rates.lead + ' · Appointment RM' + S.data.rates.appt + ' · Close RM' + S.data.rates.close + '</div></div><div style="text-align:right"><div class="big-num" style="font-size:24px">RM' + bonusSum.toLocaleString() + '</div><div class="faint">so far</div></div></a>';
     html += '<div class="tiles">' +
-      '<div class="tile"><div class="k">Team referrals</div><div class="v">' + st.total + '</div><div class="s">' + st.approved + ' approved · ' + (st.total - st.approved) + ' pending</div></div>' +
+      '<div class="tile"><div class="k">Team names</div><div class="v">' + st.total + '</div><div class="s">' + st.approved + ' approved · ' + (st.total - st.approved) + ' pending' + (st.refs.filter(function (r) { return r.source === 'roadshow'; }).length ? ' · 🎪 ' + st.refs.filter(function (r) { return r.source === 'roadshow'; }).length + ' from roadshows' : '') + '</div></div>' +
       '<div class="tile"><div class="k">Active agents</div><div class="v">' + st.active + '<span style="font-size:15px;color:var(--faint)"> / ' + st.members + '</span></div><div class="s">posted at least one page</div></div>' +
       '<div class="tile"><div class="k">Names per page</div><div class="v">' + st.perPage.toFixed(1) + '</div><div class="s">' + st.posts.length + ' pages posted</div></div>' +
       '<div class="tile"><div class="k">Top agent</div><div class="v" style="font-size:18px;padding-top:5px">' + (top && top.total ? esc(top.name) : '—') + '</div><div class="s">' + (top && top.total ? top.total + ' referrals' : 'no referrals yet') + '</div></div></div>';
@@ -507,6 +510,7 @@
     var rs = refsOf(p.id), others = S.data.posts.filter(function (x) { return x.kind === 'referral' && x.status === 'pending' && x.id !== p.id; });
     S.decide = S.decide && S.decide.post === p.id ? S.decide : {post: p.id, d: rs.reduce(function (o, r) { o[r.id] = r.status === 'pending' ? (r.dup ? 'rejected' : 'approved') : r.status; return o; }, {})};
     return '<div style="margin-bottom:10px"><a href="#/board">← Board</a></div><div class="card"><div class="row">' + avatar(p.agentId) + '<div class="grow"><div class="name">' + esc(agent(p.agentId).name) + '</div><div class="faint">' + ago(p.created) + (p.giver ? ' · from ' + esc(p.giver) : '') + '</div></div></div>' +
+      (p.source === 'roadshow' ? '<div class="notice info">🎪 <b>Roadshow</b> · 📍 ' + esc(p.location) + '<br>Check the selfie shows ' + esc(agent(p.agentId).name.split(' ')[0]) + ' at this place.</div>' + (p.selfie && !p.purged ? '<div class="photo-box" data-photo="' + p.id + '" data-which="selfie" style="max-width:260px">' + (S.photos[p.id + ':s'] ? '<img alt="" src="data:image/jpeg;base64,' + S.photos[p.id + ':s'] + '">' : 'Loading selfie…') + '</div>' : '') : '') +
       '<div class="notice info">Tick the names that count for bonus. Possible duplicates start unticked, please check them.</div>' +
       rs.map(function (r) { var on = S.decide.d[r.id] === 'approved'; return '<label class="check"><input type="checkbox" data-rv="' + r.id + '"' + (on ? ' checked' : '') + '><div><b>' + esc(r.name) + '</b>' + (r.phone ? ' <span class="faint">' + esc(r.phone) + '</span>' : '') + (r.dup ? '<div class="faint" style="color:var(--warn)">⚠️ ' + esc(r.dup) + '</div>' : '') + '</div></label>'; }).join('') +
       (p.photo && !p.purged ? '<div class="photo-box" data-photo="' + p.id + '">' + (S.photos[p.id] ? '<img alt="" src="data:image/jpeg;base64,' + S.photos[p.id] + '">' : 'Loading photo…') + '</div>' : '') +
@@ -528,40 +532,85 @@
     };
   };
 
+  /* ---------- roadshow: place + selfie first, then the name list ---------- */
+  function roadshowStart() {
+    var rs = S.rs = S.rs || {location: '', selfie: null}, places = LS.get('rsPlaces', []);
+    var ready = rs.location.trim().length >= 3 && rs.selfie;
+    return '<div style="margin-bottom:10px"><a href="#" data-mode="">← Back</a></div><div class="card"><h2>🎪 Roadshow name list</h2><div class="faint">Same as referrals: the app reads the names, covers private details, RM' + S.data.rates.lead + ' per name once called within ' + (S.data.callDays || 14) + ' days.</div>' +
+      '<label class="field"><span>1. 📍 Where is the roadshow?</span><input id="rs-loc" list="rs-places" maxlength="80" placeholder="e.g. Queensbay Mall, Level 1 atrium" value="' + esc(rs.location) + '"></label>' +
+      '<datalist id="rs-places">' + places.map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') + '</datalist>' +
+      '<div class="field"><span>2. 🤳 Selfie at the booth (proof)</span>' +
+      (rs.selfie ? '<div class="canvas-wrap" style="max-width:240px"><canvas id="rs-selfie"></canvas></div><div class="faint" style="margin-top:4px">' + (rs.faceNote || '') + ' Tap a 🙂 to uncover, drag to cover more.</div><label class="btn sm" style="margin-top:6px">Retake selfie<input type="file" accept="image/*" capture="user" hidden data-selfie></label>'
+        : '<label class="btn block">🤳 Take selfie<input type="file" accept="image/*" capture="user" hidden data-selfie></label>') + '</div>' +
+      '<div class="field"><span>3. 📋 Photo of the name list</span>' +
+      (ready ? '<label class="btn gold block">📷 Take photo of the list<input type="file" accept="image/*" capture="environment" hidden data-file></label><div style="height:8px"></div><label class="btn block">🖼 Choose from gallery<input type="file" accept="image/*" hidden data-file></label>'
+        : '<div class="notice warn">Fill in the place and take the selfie first.</div>') + '</div></div>';
+  }
+  function wireRoadshowStart(root) {
+    var loc = root.querySelector('#rs-loc'); if (!loc || !S.rs) return;
+    loc.oninput = function () { var was = S.rs.location.trim().length >= 3; S.rs.location = loc.value; if ((S.rs.location.trim().length >= 3) !== was && S.rs.selfie) { render(); var l = document.getElementById('rs-loc'); if (l) { l.focus(); l.setSelectionRange(l.value.length, l.value.length); } } };
+    loc.onchange = function () { render(); };
+    var sc = root.querySelector('#rs-selfie'); if (sc && S.rs.selfie) { REDACT.render(S.rs.selfie.canvas, S.rs.selfie.boxes, sc); wireDraw(sc, S.rs.selfie); }
+    root.querySelectorAll('[data-selfie]').forEach(function (inp) {
+      inp.onchange = function () {
+        var file = inp.files[0]; if (!file) return;
+        toast('Checking selfie…', 'Covering other people\'s faces');
+        REDACT.loadImage(file).then(function (img) {
+          var cv = REDACT.toCanvas(img, 1280), sf = {canvas: cv, boxes: []}; S.rs.selfie = sf; S.rs.faceNote = '';
+          return REDACT.faces(cv).then(function (fs) {
+            fs.sort(function (a, b) { return b.w * b.h - a.w * a.h; });
+            sf.boxes = fs.map(function (b, i) { return {kind: 'face', x: b.x, y: b.y, w: b.w, h: b.h, off: i === 0}; });   // biggest face = you, stays visible
+            S.rs.faceNote = fs.length > 1 ? (fs.length - 1) + ' other face' + (fs.length > 2 ? 's' : '') + ' covered.' : '';
+          }, function () { S.rs.faceNote = 'Face check not available on this phone. Drag over other people\'s faces.'; });
+        }).then(function () { render(); }, function (e) { toast('Selfie not opened', e.message); });
+      };
+    });
+  }
+
   /* ---------- snap a referral page ---------- */
   function viewSnap() {
     var d = S.draft;
-    if (!d) return '<div class="card snap-hero"><div class="big-ico">📒</div><h2>Snap your referral page</h2><p class="muted">Take a photo of the filled referral list. The app reads the names, counts them for you, and covers phone numbers, ages, remarks and faces before your team sees it.</p>' +
+    if (!d && !S.snapMode) return '<div class="card snap-hero"><h2>What did you get?</h2><p class="muted">Both count the same: RM' + S.data.rates.lead + ' per name once you call within ' + (S.data.callDays || 14) + ' days.</p>' +
+      '<button class="btn gold block" data-mode="referral" style="padding:16px">📒 Referral page<br><span style="font-weight:400;font-size:13px">Names a client referred to you</span></button><div style="height:10px"></div>' +
+      '<button class="btn block" data-mode="roadshow" style="padding:16px">🎪 Roadshow name list<br><span style="font-weight:400;font-size:13px">Names from a booth / event · needs place + selfie</span></button><div style="height:10px"></div>' +
+      '<button class="btn block" id="sn-approach">🙋 I asked a client but got no names</button></div>';
+    if (!d && S.snapMode === 'roadshow') return roadshowStart();
+    if (!d) return '<div style="margin-bottom:10px"><a href="#" data-mode="">← Back</a></div><div class="card snap-hero"><div class="big-ico">📒</div><h2>Snap your referral page</h2><p class="muted">Take a photo of the filled referral list. The app reads the names, counts them for you, and covers phone numbers, ages, remarks and faces before your team sees it.</p>' +
       '<label class="btn gold block">📷 Take photo<input type="file" accept="image/*" capture="environment" hidden data-file></label><div style="height:8px"></div>' +
-      '<label class="btn block">🖼 Choose from gallery<input type="file" accept="image/*" hidden data-file></label><div style="height:8px"></div>' +
-      '<button class="btn block" id="sn-approach">🙋 I asked a client but got no names</button>' +
+      '<label class="btn block">🖼 Choose from gallery<input type="file" accept="image/*" hidden data-file></label>' +
       '<ul class="steps faint" style="text-align:left;margin-top:16px"><li>✔ Lay the page flat, in good light, whole page in the photo.</li><li>✔ The original photo is not saved. Only the covered one is.</li><li>✔ Phone numbers, age and remarks auto-delete after 3 months. Names stay.</li></ul></div>';
     if (d.stage === 'busy') return '<div class="card snap-hero"><div class="spinner"></div><h2>' + esc(d.msg) + '</h2><ul class="steps muted">' + d.steps.map(function (s) { return '<li>' + s + '</li>'; }).join('') + '</ul></div>';
     if (d.stage === 'failed') return '<div class="card"><h2>Could not read the photo</h2><div class="notice bad">' + esc(d.error) + '</div><div class="actions"><button class="btn primary" id="sn-retry">Try again</button><button class="btn" id="sn-manual">Type the names myself</button><button class="btn" id="sn-cancel">Cancel</button></div></div>';
     var rows = d.rows, n = rows.filter(function (r) { return r.name.trim().length >= 2; }).length, unclear = rows.filter(function (r) { return r.unclear; }).length;
-    var html = '<div class="card"><h2>Check before posting</h2><div class="faint">Black boxes and 🙂 are hidden from the team. <b>Drag</b> on the photo to cover more, <b>tap</b> a box to uncover it.</div>' +
+    var rsd = d.source === 'roadshow';
+    var html = (rsd ? '<div class="card"><h2>🎪 Roadshow</h2><label class="field"><span>📍 Roadshow location</span><input id="sn-loc" value="' + esc(d.location) + '" maxlength="80"></label>' +
+      '<div class="faint">Selfie (proof). Your face stays visible; other people\'s faces are covered 🙂. Tap a cover to remove it, drag to add one.</div>' +
+      '<div class="canvas-wrap" style="margin-top:8px;max-width:260px"><canvas id="sn-selfie"></canvas></div></div>' : '') +
+      '<div class="card"><h2>Check before posting</h2><div class="faint">Black boxes and 🙂 are hidden from the team. <b>Drag</b> on the photo to cover more, <b>tap</b> a box to uncover it.</div>' +
       '<div class="canvas-wrap" style="margin-top:10px"><canvas id="sn-canvas"></canvas></div>' +
       '<div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><span class="faint">' + d.boxes.filter(function (b) { return !b.off && b.kind !== 'face'; }).length + ' private spots covered · ' + d.boxes.filter(function (b) { return !b.off && b.kind === 'face'; }).length + ' faces covered</span>' +
       '<button class="btn sm" id="sn-undo">Undo last box</button></div>' +
       (d.faceErr ? '<div class="notice warn">Face check could not run on this phone (' + esc(d.faceErr) + '). If there are faces, drag over them to cover.</div>' : '') +
       (d.manual ? '<div class="notice warn">Typed by hand: nothing was covered automatically. Drag over every phone number, age and remark before posting.</div>' : '') +
       (d.notes ? '<div class="notice info">AI note: ' + esc(d.notes) + '</div>' : '') + '</div>';
-    html += '<div class="card"><div class="row"><h2 class="grow">Referrals found: ' + n + '</h2></div>' +
+    html += '<div class="card"><div class="row"><h2 class="grow">' + (rsd ? 'Names found: ' : 'Referrals found: ') + n + '</h2></div>' +
       (unclear ? '<div class="notice warn">' + unclear + ' name' + (unclear === 1 ? ' was' : 's were') + ' hard to read (yellow). Please fix the spelling.</div>' : '') +
       (!rows.length ? '<div class="notice warn">No names were found. Retake the photo, or add the names below.</div>' : '') +
-      '<label class="field"><span>Referral given by (your client)</span><input id="sn-giver" value="' + esc(d.giver) + '" placeholder="Name at &quot;Your Name&quot;"></label>' +
+      (rsd ? '' : '<label class="field"><span>Referral given by (your client)</span><input id="sn-giver" value="' + esc(d.giver) + '" placeholder="Name at &quot;Your Name&quot;"></label>') +
       rows.map(function (r, i) {
         var priv = [r.age && 'Age ' + r.age, r.phone && r.phone, r.gender, r.remarks].filter(Boolean).join(' · ');
         return '<div class="ref-edit' + (r.unclear ? ' unclear' : '') + '"><div class="no">' + (i + 1) + '</div><div><input data-rn="' + i + '" value="' + esc(r.name) + '" placeholder="Name">' + (priv ? '<div class="priv">🔒 ' + esc(priv) + '</div>' : '') + '</div><button class="btn sm" data-rx="' + i + '" aria-label="Remove">✕</button></div>';
       }).join('') +
       '<div class="actions"><button class="btn sm" id="sn-add">+ Add a name</button></div><div class="faint" style="margin-top:6px">🔒 = only you and your leader see it, and it auto-deletes in 3 months.</div></div>';
     html += '<div class="card"><label class="check"><input type="checkbox" id="sn-ok"' + (d.ok ? ' checked' : '') + '><span>I checked the photo: no phone number, IC, age, remark, my client\'s own name or face can be seen.</span></label>' +
-      '<button class="btn gold block" id="sn-post"' + (n && d.ok ? '' : ' disabled') + '>Post ' + n + ' referral' + (n === 1 ? '' : 's') + ' to the team</button>' +
+      '<button class="btn gold block" id="sn-post"' + (n && d.ok ? '' : ' disabled') + '>Post ' + n + (rsd ? ' roadshow name' : ' referral') + (n === 1 ? '' : 's') + ' to the team</button>' +
       '<div class="actions"><button class="btn sm" id="sn-cancel">Cancel</button><label class="btn sm">Retake<input type="file" accept="image/*" capture="environment" hidden data-file></label></div></div>';
     return html;
   }
   viewSnap.wire = function (root) {
     root.querySelectorAll('[data-file]').forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) startSnap(inp.files[0]); }; });
+    root.querySelectorAll('[data-mode]').forEach(function (b) { b.onclick = function (e) { e.preventDefault(); S.snapMode = b.dataset.mode || null; render(); }; });
+    wireRoadshowStart(root);
     var ap = root.querySelector('#sn-approach');
     if (ap) ap.onclick = function () {
       confirmBox('Log an approach?', 'You asked a client for referrals but got no names this time. It counts as an <b>Approach</b> on your bonus sheet (effort, not paid). Asking is the habit that wins.', 'Log it').then(function (y) {
@@ -570,19 +619,21 @@
     };
     var d = S.draft; if (!d) return;
     var q = function (s) { return root.querySelector(s); };
-    if (q('#sn-cancel')) q('#sn-cancel').onclick = function () { S.draft = null; render(); };
+    if (q('#sn-cancel')) q('#sn-cancel').onclick = function () { S.draft = null; S.snapMode = null; S.rs = null; render(); };
     if (q('#sn-retry')) q('#sn-retry').onclick = function () { readPhoto(); };
     if (q('#sn-manual')) q('#sn-manual').onclick = function () { d.stage = 'review'; d.manual = true; d.rows = [{name: ''}]; render(); };
     if (d.stage !== 'review') return;
     var cv = q('#sn-canvas'); REDACT.render(d.canvas, d.boxes, cv); wireDraw(cv, d);
     q('#sn-undo').onclick = function () { for (var i = d.boxes.length - 1; i >= 0; i--) if (!d.boxes[i].off) { d.boxes[i].off = true; break; } render(); };
-    q('#sn-giver').oninput = function (e) { d.giver = e.target.value; };
+    if (q('#sn-giver')) q('#sn-giver').oninput = function (e) { d.giver = e.target.value; };
+    if (q('#sn-loc')) q('#sn-loc').oninput = function (e) { d.location = e.target.value; };
+    if (q('#sn-selfie') && d.selfie) { var sc = q('#sn-selfie'); REDACT.render(d.selfie.canvas, d.selfie.boxes, sc); wireDraw(sc, d.selfie); }
     root.querySelectorAll('[data-rn]').forEach(function (inp) { inp.oninput = function () { var r = d.rows[+inp.dataset.rn]; r.name = inp.value; r.unclear = /\?/.test(inp.value); updatePostBtn(); }; inp.onchange = function () { render(); }; });
     root.querySelectorAll('[data-rx]').forEach(function (b) { b.onclick = function () { d.rows.splice(+b.dataset.rx, 1); render(); }; });
     q('#sn-add').onclick = function () { d.rows.push({name: ''}); render(); var ins = root.ownerDocument.querySelectorAll('[data-rn]'); if (ins.length) ins[ins.length - 1].focus(); };
     q('#sn-ok').onchange = function (e) { d.ok = e.target.checked; updatePostBtn(); };
     q('#sn-post').onclick = postDraft;
-    function updatePostBtn() { var n = d.rows.filter(function (r) { return r.name.trim().length >= 2; }).length, b = document.getElementById('sn-post'); b.disabled = !(n && d.ok); b.textContent = 'Post ' + n + ' referral' + (n === 1 ? '' : 's') + ' to the team'; }
+    function updatePostBtn() { var n = d.rows.filter(function (r) { return r.name.trim().length >= 2; }).length, b = document.getElementById('sn-post'); b.disabled = !(n && d.ok); b.textContent = 'Post ' + n + (d.source === 'roadshow' ? ' roadshow name' : ' referral') + (n === 1 ? '' : 's') + ' to the team'; }
   };
   function wireDraw(cv, d) {
     var start = null, box = null;
@@ -602,7 +653,8 @@
     });
   }
   function startSnap(file) {
-    S.draft = {stage: 'busy', msg: 'Opening photo…', steps: [], boxes: [], rows: [], giver: '', ok: false};
+    S.draft = {stage: 'busy', msg: 'Opening photo…', steps: [], boxes: [], rows: [], giver: '', ok: false, source: S.snapMode === 'roadshow' ? 'roadshow' : 'referral'};
+    if (S.draft.source === 'roadshow' && S.rs) { S.draft.location = S.rs.location; S.draft.selfie = S.rs.selfie; }
     location.hash = '#/snap'; render();
     REDACT.loadImage(file).then(function (img) {
       S.draft.canvas = REDACT.toCanvas(img, 1600);
@@ -610,13 +662,13 @@
     }).catch(function (e) { S.draft.stage = 'failed'; S.draft.error = e.message; render(); });
   }
   function readPhoto() {
-    var d = S.draft; d.stage = 'busy'; d.msg = 'Reading your referral page…'; d.steps = ['⏳ Finding names and counting referrals', '⏳ Finding phone numbers, ages, remarks', '⏳ Looking for faces']; render();
+    var d = S.draft; d.stage = 'busy'; d.msg = d.source === 'roadshow' ? 'Reading your roadshow name list…' : 'Reading your referral page…'; d.steps = ['⏳ Finding names and counting referrals', '⏳ Finding phone numbers, ages, remarks', '⏳ Looking for faces']; render();
     var face = REDACT.faces(d.canvas).then(function (f) { d.steps[2] = '✔ Faces checked (' + f.length + ' found)'; render(); return f; })
       .catch(function (e) { d.faceErr = (e && e.message || 'not supported').slice(0, 60); d.steps[2] = '⚠ Face check not available'; render(); return []; });
     var ai = api('read', {image: REDACT.b64(d.canvas, 0.85)}).then(function (r) { d.steps[0] = '✔ ' + r.read.rows.length + ' names found'; d.steps[1] = '✔ ' + r.read.private.length + ' private spots found'; render(); return r.read; });
     Promise.all([ai, face]).then(function (res) {
       var r = res[0];
-      d.rows = r.rows; d.giver = r.giver; d.notes = r.notes; d.manual = false;
+      d.rows = r.rows; d.giver = d.source === 'roadshow' ? '' : r.giver; d.notes = r.notes; d.manual = false;
       d.boxes = r.private.map(function (b) { return {kind: 'private', type: b.type, x: b.x, y: b.y, w: b.w, h: b.h}; })
         .concat(res[1]).concat(r.faces.map(function (b) { return {kind: 'face', x: b.x, y: b.y, w: b.w, h: b.h}; }));
       d.stage = 'review'; render();
@@ -624,12 +676,17 @@
   }
   function postDraft() {
     var d = S.draft, rows = d.rows.filter(function (r) { return r.name.trim().length >= 2; });
-    confirmBox('Post ' + rows.length + ' referral' + (rows.length === 1 ? '' : 's') + '?', 'Your team will see your name, the client names and the covered photo. Phone numbers, ages and remarks stay private and auto-delete in 3 months.', 'Post it').then(function (y) {
+    var rsd = d.source === 'roadshow';
+    if (rsd && (!d.location || d.location.trim().length < 3)) return toast('Location needed', 'Type where the roadshow was.');
+    if (rsd && !d.selfie) return toast('Selfie needed', 'Take a selfie at the roadshow as proof.');
+    confirmBox('Post ' + rows.length + (rsd ? ' roadshow name' : ' referral') + (rows.length === 1 ? '' : 's') + '?', 'Your team will see your name, ' + (rsd ? 'the roadshow place, your selfie, ' : '') + 'the names and the covered photo. Phone numbers, ages and remarks stay private and auto-delete in 3 months.', 'Post it').then(function (y) {
       if (!y) return;
       var out = REDACT.render(d.canvas, d.boxes), small = REDACT.toCanvas(out, 1280);
       d.stage = 'busy'; d.msg = 'Posting…'; d.steps = []; render();
-      api('post', {giver: d.giver, rows: rows, photo: REDACT.b64(small, 0.8), covered: true}).then(function (r) {
-        S.photos[r.post.id] = null; S.draft = null;
+      var extra = rsd ? {source: 'roadshow', location: d.location.trim(), selfie: REDACT.b64(REDACT.toCanvas(REDACT.render(d.selfie.canvas, d.selfie.boxes), 1080), 0.8)} : {};
+      api('post', Object.assign({giver: d.giver, rows: rows, photo: REDACT.b64(small, 0.8), covered: true}, extra)).then(function (r) {
+        if (rsd) { var pl = LS.get('rsPlaces', []).filter(function (x) { return x !== extra.location; }); pl.unshift(extra.location); LS.set('rsPlaces', pl.slice(0, 8)); }
+        S.photos[r.post.id] = null; S.draft = null; S.snapMode = null; S.rs = null;
         return refresh(true).then(function () { showCheer(r); });
       }).catch(function (e) { d.stage = 'review'; render(); toast('Not posted', errText(e)); });
     });
@@ -638,7 +695,7 @@
     if (location.hash !== '#/feed') { route.keepModal = true; location.hash = '#/feed'; }
     if (S.sounds) SOUND.cheer(); confetti();
     var p = S.data.posts.filter(function (x) { return x.id === r.post.id; })[0] || r.post;
-    modal('<div class="cheer"><div class="num">+' + r.post.count + '</div><div class="faint">referral' + (r.post.count === 1 ? '' : 's') + ' added · ' + r.monthTotal + ' this month</div>' +
+    modal('<div class="cheer"><div class="num">+' + r.post.count + '</div><div class="faint">' + (r.post.source === 'roadshow' ? 'roadshow name' : 'referral') + (r.post.count === 1 ? '' : 's') + ' added · ' + r.monthTotal + ' names this month</div>' +
       r.cheer.map(function (c) { return '<div class="msg-c">' + esc(c) + '</div>'; }).join('') +
       (r.milestone ? '<div class="notice good">🏆 Milestone: ' + r.milestone + ' referrals this month! The team has been told.</div>' : '') +
       '<div class="faint">Waiting for leader approval to count for bonus.</div></div><div class="btns"><button class="btn" data-n>Done</button><button class="btn wa" data-y>Share to WhatsApp</button></div>', function (m, close) {
@@ -688,7 +745,7 @@
     };
     var callBtn = !mine ? '' : r.calledAt ? '<span class="chip">✓ 📞 Called ' + ago(r.calledAt) + (!(r.appt === 'pending' || r.appt === 'approved') ? ' <a href="#" data-undo="call" data-ref="' + r.id + '" class="faint">undo</a>' : '') + '</span>'
       : '<button class="btn sm gold" data-step="call" data-ref="' + r.id + '">📞 Called</button>' + (r.phone ? ' <a class="btn sm" href="tel:' + esc(r.phone.replace(/[^\d+]/g, '')) + '">Call now</a>' : '');
-    return '<div class="ref-edit" style="grid-template-columns:1fr"><div><b>' + esc(r.name) + '</b> <span class="faint">' + (r.status === 'pending' ? 'lead waiting approval · ' : '') + ago(r.created) + '</span>' +
+    return '<div class="ref-edit" style="grid-template-columns:1fr"><div><b>' + esc(r.name) + '</b> <span class="faint">' + (r.source === 'roadshow' ? '🎪 roadshow · ' : '') + (r.status === 'pending' ? 'lead waiting approval · ' : '') + ago(r.created) + '</span>' +
       '<div style="margin-top:5px">' + callChip(r) + '</div>' +
       '<div class="actions" style="margin-top:6px">' + callBtn + btn('appt', '☕ Appointment done') + btn('close', '🎯 Closed case') + '</div></div></div>';
   }
@@ -805,7 +862,7 @@
       '<div class="faint">Leads RM' + R.lead + ' each · Appointment RM' + R.appt + ' · Close RM' + R.close + '. Only approved items are paid; "waiting" needs leader approval first. A lead is paid only if it is called within ' + ((S.data && S.data.callDays) || 14) + ' days, otherwise it is forfeited.</div>' +
       (paid ? '<div class="notice good">✅ Marked paid on ' + dayLabel(paid.at) + (me.leader ? ' by ' + esc(paid.by) + ': RM' + paid.total.toLocaleString() : ': RM' + paid.mine.toLocaleString() + ' to you') + '</div>' : (mk < curMonth() ? '<div class="notice warn">Not marked paid yet.</div>' : '<div class="notice info">Month in progress · ' + daysLeftInMonth() + ' day' + (daysLeftInMonth() === 1 ? '' : 's') + ' left to update appointments and closes.</div>')) +
       '<div class="scroll-x"><table class="data"><tr><th>Name</th><th class="n">Approach</th><th class="n">Leads<br>(RM' + R.lead + ')</th><th class="n">Appt<br>(RM' + R.appt + ')</th><th class="n">Close<br>(RM' + R.close + ')</th><th class="n">Total</th></tr>' +
-      rows.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="n">' + (x.approach || '') + '</td><td class="n">' + (x.leads || '') + w(x.leadsWaiting) + (x.leadsToCall ? '<div class="faint">+' + x.leadsToCall + ' to call</div>' : '') + (x.leadsForfeit ? '<div class="faint" style="color:var(--bad)">' + x.leadsForfeit + ' forfeited</div>' : '') + '</td><td class="n">' + (x.appt || '') + w(x.apptWaiting) + '</td><td class="n">' + (x.close || '') + w(x.closeWaiting) + '</td><td class="n"><b>RM' + x.total.toFixed(2) + '</b></td></tr>'; }).join('') +
+      rows.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="n">' + (x.approach || '') + '</td><td class="n">' + (x.leads || '') + (x.leadsRoadshow ? '<div class="faint">incl. ' + x.leadsRoadshow + ' 🎪</div>' : '') + w(x.leadsWaiting) + (x.leadsToCall ? '<div class="faint">+' + x.leadsToCall + ' to call</div>' : '') + (x.leadsForfeit ? '<div class="faint" style="color:var(--bad)">' + x.leadsForfeit + ' forfeited</div>' : '') + '</td><td class="n">' + (x.appt || '') + w(x.apptWaiting) + '</td><td class="n">' + (x.close || '') + w(x.closeWaiting) + '</td><td class="n"><b>RM' + x.total.toFixed(2) + '</b></td></tr>'; }).join('') +
       (me.leader ? '<tr><td><b>Total</b></td><td class="n"><b>' + sum('approach') + '</b></td><td class="n"><b>' + sum('leads') + '</b></td><td class="n"><b>' + sum('appt') + '</b></td><td class="n"><b>' + sum('close') + '</b></td><td class="n"><b>RM' + sum('total').toFixed(2) + '</b></td></tr>' : '') +
       '</table></div>';
     if (paid && me.leader && paid.total !== sum('total')) html += '<div class="notice warn">Numbers changed after you marked it paid (paid RM' + paid.total + ', now RM' + sum('total') + '). Check late approvals.</div>';
@@ -819,8 +876,8 @@
     q('#bn-month').onchange = function (e) { location.hash = '#/bonus/' + e.target.value; };
     if (q('#bn-csv')) q('#bn-csv').onclick = function () {
       var R = S.data.rates, rows = CORE.bonusTable(S.data.agents, S.data.posts, S.data.refs, mk, R);
-      var lines = [['Name', 'Approach', 'Leads Obtain (RM' + R.lead + ')', 'Successful Appointment (RM' + R.appt + ')', 'Close Case (RM' + R.close + ')', 'Total (RM)', 'Waiting approval', 'Leads to call', 'Leads forfeited (no call in 14 days)'].join(',')]
-        .concat(rows.map(function (x) { return ['"' + x.name.replace(/"/g, '""') + '"', x.approach, x.leads, x.appt, x.close, x.total.toFixed(2), x.leadsWaiting + x.apptWaiting + x.closeWaiting, x.leadsToCall, x.leadsForfeit].join(','); }));
+      var lines = [['Name', 'Approach', 'Leads Obtain (RM' + R.lead + ')', 'Successful Appointment (RM' + R.appt + ')', 'Close Case (RM' + R.close + ')', 'Total (RM)', 'Waiting approval', 'Leads to call', 'Leads forfeited (no call in 14 days)', 'Paid leads from roadshows'].join(',')]
+        .concat(rows.map(function (x) { return ['"' + x.name.replace(/"/g, '""') + '"', x.approach, x.leads, x.appt, x.close, x.total.toFixed(2), x.leadsWaiting + x.apptWaiting + x.closeWaiting, x.leadsToCall, x.leadsForfeit, x.leadsRoadshow].join(','); }));
       var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], {type: 'text/csv'})); a.download = 'referral-bonus-' + mk + '.csv'; a.click();
     };
     if (q('#bn-paid')) q('#bn-paid').onclick = function () {

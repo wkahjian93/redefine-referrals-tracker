@@ -18,6 +18,11 @@
 5. Tick **"I checked the photo…"** → **Post** → **Post it**.
 6. 🎉 You get your encouragement, and the team sees your update straight away. Tap **Share to WhatsApp** if you want to tell the group. WhatsApp opens and you pick the group.
 
+**Got names at a roadshow?** Tap 📷 Snap → **🎪 Roadshow name list**:
+1. Type the **📍 roadshow location** (the app remembers places you used before).
+2. Take a **🤳 selfie at the booth** as proof. Your face stays visible; other people's faces are covered 🙂 automatically.
+3. Snap the **name list**. Everything after that is the same as a referral page: names counted, private details covered, leader approves, RM1 per name once you call within 14 days, ☕ appointment RM5, 🎯 close RM20.
+
 **Asked but got no names?** Snap → **🙋 I asked a client but got no names**. It counts as an *Approach* (effort, not paid).
 
 **After the referral (this is where the bigger bonus is):** the **📋 Leads** tab (bottom bar).

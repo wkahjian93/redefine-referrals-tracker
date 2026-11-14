@@ -40,7 +40,13 @@ var REDACT = (function () {
         out.push({kind: 'face', x: p[0] + b.originX / W, y: p[1] + b.originY / H, w: b.width / W, h: b.height / H});
       });
     });
-    return out;
+    // the whole-photo pass and the quarter passes often find the SAME face: keep one box per face
+    var overlap = function (a, b) {
+      var ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)), iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+      return ix * iy / Math.min(a.w * a.h, b.w * b.h);
+    };
+    out.sort(function (a, b) { return b.w * b.h - a.w * a.h; });
+    return out.filter(function (b, i) { return !out.slice(0, i).some(function (o) { return overlap(o, b) > 0.4; }); });
   }
 
   function pad(b, k) {

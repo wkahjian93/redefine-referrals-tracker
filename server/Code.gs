@@ -10,8 +10,8 @@
 var CORE = (function () {
   var TABLES = {
     agents: ['id', 'name', 'pin', 'role', 'created', 'active'],
-    posts: ['id', 'agentId', 'kind', 'giver', 'text', 'photoId', 'count', 'status', 'created', 'purged'],
-    refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt', 'called', 'calledAt'],
+    posts: ['id', 'agentId', 'kind', 'giver', 'text', 'photoId', 'count', 'status', 'created', 'purged', 'source', 'location', 'selfieId'],
+    refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt', 'called', 'calledAt', 'source'],
     comments: ['id', 'postId', 'agentId', 'text', 'created'],
     settings: ['key', 'value'],
     log: ['at', 'by', 'action', 'detail'],
@@ -110,11 +110,12 @@ var CORE = (function () {
     'You read a photo that an insurance agent took as proof of referrals. Usually it is a page of the REDEFINE / KJG',
     '"Prospect Referral List / 转介绍名单" booklet: "Your Name / 您的姓名" at the top (the client who GAVE the referrals),',
     'then numbered rows 1-5, each with Name/姓名, Age/年龄, Contact No./联络号码, Gender/性别 and a Remark/备注 column with',
-    'L:, W:, R:, S:, Others:. It may also be a WhatsApp screenshot, a name card, a contact screen, or a meeting photo.',
+    'L:, W:, R:, S:, Others:. It may also be a ROADSHOW name list (a sign-up sheet, survey / lucky-draw forms, a booth\n' +
+    'register with one person per row or per form), a WhatsApp screenshot, a name card, a contact screen, or a meeting photo.',
     'Handwriting may be messy, in English, Chinese or Malay.',
     '',
     'Return ONLY a JSON object:',
-    '{"kind":"referral_page|whatsapp|name_card|contact|photo|other",',
+    '{"kind":"referral_page|roadshow_list|whatsapp|name_card|contact|photo|other",',
     ' "giver":"name written at Your Name, or empty",',
     ' "rows":[{"no":1,"name":"","age":"","phone":"","gender":"","remarks":"L: .. W: .. R: .. S: .. Others: ..","unclear":false}],',
     ' "private":[{"type":"giver|phone|age|remarks|ic|address|email|bank|other","x":0.1,"y":0.2,"w":0.3,"h":0.04}],',
@@ -122,7 +123,7 @@ var CORE = (function () {
     ' "notes":"short note about anything unreadable"}',
     '',
     'Rules:',
-    '1. One row per referred PERSON whose name is written. Skip empty rows. Never invent a name, number or age.',
+    '1. One row per referred / signed-up PERSON whose name is written. Skip empty rows. Never invent a name, number or age.',
     '   Copy what is written; if a character is unreadable put "?" there and set "unclear":true.',
     '2. Do NOT list the giver ("Your Name") as a referral. Do not list the agent.',
     '3. "private" = a box around EVERY piece of private data visible in the photo: each contact number, each age,',
@@ -169,7 +170,8 @@ var CORE = (function () {
     big: ['{n} names from one page, that is trust earned. 客户愿意介绍，是对你最大的肯定。', '{n} referrals in one go! Your client believes in you.'],
     one: ['Every name is a family you can protect. Keep asking, 坚持就是力量。', 'One more door opened. No magic, just basic.'],
     streak: ['{d} days in a row with referrals. Hardwork on purpose!', 'Referral streak: {d} days. Consistency beats talent.'],
-    top: ['You are #1 on the board this month. Lead the way!', 'Top of the team this month. 继续发光!']
+    top: ['You are #1 on the board this month. Lead the way!', 'Top of the team this month. 继续发光!'],
+    roadshow: ['{n} names from the roadshow at {loc}! Standing there all day paid off. 💪', '{n} new contacts from {loc}. Call them while they still remember your booth! 📞']
   };
   function pick(store, list, vars) {
     var s = list[Math.floor(store.random() * list.length)];
@@ -188,7 +190,12 @@ var CORE = (function () {
 
   /* ---------- posting a referral page ---------- */
   function post(q, store, me) {
+    var source = q.source === 'roadshow' ? 'roadshow' : 'referral', location = str(q.location, 80);
     if (!b64ok(q.photo, MAX_PHOTO_B64)) fail('bad_photo');
+    if (source === 'roadshow') {   // roadshow names need the place and a selfie there as proof
+      if (location.length < 3) fail('location_needed');
+      if (!b64ok(q.selfie, MAX_PHOTO_B64)) fail('selfie_needed');
+    }
     if (q.covered !== true) fail('privacy_not_confirmed');
     var rows = (Array.isArray(q.rows) ? q.rows : []).slice(0, MAX_ROWS).map(function (r) {
       return {name: str(r.name, 60), age: str(r.age, 10), phone: str(r.phone, 30), gender: str(r.gender, 10), remarks: str(r.remarks, 300)};
@@ -196,15 +203,16 @@ var CORE = (function () {
     if (!rows.length) fail('no_names');
     var now = nowIso(store), posts = store.load('posts'), refs = store.load('refs');
     var mk = monthKey(now), before = monthCounts(refs, mk), firstEver = !refs.some(function (r) { return r.agentId === me.id; });
-    var p = {id: newId(store, 10), agentId: me.id, kind: 'referral', giver: str(q.giver, 60), text: str(q.text, 300),
-      photoId: store.putPhoto('ref_' + now.slice(0, 10) + '_' + me.id + '.jpg', q.photo), count: rows.length, status: 'pending', created: now, purged: ''};
+    var p = {id: newId(store, 10), agentId: me.id, kind: 'referral', giver: source === 'roadshow' ? '' : str(q.giver, 60), text: str(q.text, 300),
+      photoId: store.putPhoto((source === 'roadshow' ? 'roadshow_' : 'ref_') + now.slice(0, 10) + '_' + me.id + '.jpg', q.photo), count: rows.length, status: 'pending', created: now, purged: '',
+      source: source, location: source === 'roadshow' ? location : '', selfieId: source === 'roadshow' ? store.putPhoto('selfie_' + now.slice(0, 10) + '_' + me.id + '.jpg', q.selfie) : ''};
     var live = refs.filter(function (r) { return !r.purged; });
     var added = rows.map(function (r) {
       var ph = normPhone(r.phone), dup = '';
       if (ph) live.some(function (o) { if (normPhone(o.phone) === ph) { dup = 'Same number as ' + o.name; return true; } });
       if (!dup) refs.some(function (o) { if (normName(o.name) === normName(r.name) && o.status !== 'rejected') { dup = 'Same name already on board'; return true; } });
       return {id: newId(store, 10), postId: p.id, agentId: me.id, name: r.name, age: r.age, phone: r.phone, gender: r.gender,
-        remarks: r.remarks, status: 'pending', dup: dup, created: now, purged: ''};
+        remarks: r.remarks, status: 'pending', dup: dup, created: now, purged: '', source: source};
     });
     // second pass: duplicates inside this same page
     added.forEach(function (r, i) { added.slice(0, i).some(function (o) { if (!r.dup && ((normPhone(r.phone) && normPhone(r.phone) === normPhone(o.phone)) || normName(r.name) === normName(o.name))) { r.dup = 'Repeated on this page'; return true; } }); });
@@ -213,9 +221,11 @@ var CORE = (function () {
 
     // encouragement for the agent + team milestone cards
     var after = monthCounts(refs, mk), mine = after[me.id] || 0, prev = before[me.id] || 0, cheer = [];
-    if (firstEver) cheer.push(pick(store, CHEERS.first, {}));
+    if (source === 'roadshow') cheer.push(pick(store, CHEERS.roadshow, {n: rows.length, loc: location}));
+    else if (firstEver) cheer.push(pick(store, CHEERS.first, {}));
     else if (rows.length >= 3) cheer.push(pick(store, CHEERS.big, {n: rows.length}));
     else cheer.push(pick(store, CHEERS.one, {}));
+    if (source === 'roadshow' && firstEver) cheer.push(pick(store, CHEERS.first, {}));
     var st = streakDays(posts, me.id, store); if (st >= 3) cheer.push(pick(store, CHEERS.streak, {d: st}));
     var top = Object.keys(after).sort(function (a, b) { return after[b] - after[a]; })[0];
     var wasTop = Object.keys(before).sort(function (a, b) { return before[b] - before[a]; })[0];
@@ -233,7 +243,7 @@ var CORE = (function () {
   /* ---------- reading everything the app shows ---------- */
   function publicRef(r, mine) {
     var o = {id: r.id, postId: r.postId, agentId: r.agentId, name: r.name, status: r.status, dup: '', created: r.created, purged: r.purged ? 1 : 0,
-      appt: r.appt || '', apptAt: r.apptAt || '', close: r.close || '', closeAt: r.closeAt || '', calledAt: r.calledAt || ''};
+      appt: r.appt || '', apptAt: r.apptAt || '', close: r.close || '', closeAt: r.closeAt || '', calledAt: r.calledAt || '', source: r.source || 'referral'};
     if (mine) o.dup = r.dup;
     if (mine && !r.purged) { o.age = r.age; o.phone = r.phone; o.gender = r.gender; o.remarks = r.remarks; }
     return o;
@@ -248,7 +258,7 @@ var CORE = (function () {
       me: {id: me.id, name: me.name, leader: leader, devices: store.load('devices').filter(function (d) { return d.agentId === me.id; }).length},
       callDays: CALL_DAYS, callRemindDays: CALL_REMIND_DAYS,
       agents: store.load('agents').filter(function (a) { return String(a.active) !== 'false'; }).map(function (a) { return {id: a.id, name: a.name, role: a.role}; }),
-      posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, photo: p.photoId && !p.purged ? 1 : 0, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
+      posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, source: p.source || 'referral', location: p.location || '', selfie: p.selfieId && !p.purged ? 1 : 0, photo: p.photoId && !p.purged ? 1 : 0, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
       refs: store.load('refs').map(function (r) { return publicRef(r, leader || r.agentId === me.id); }),
       comments: store.load('comments').filter(recent),
       rates: rates(store),
@@ -258,8 +268,9 @@ var CORE = (function () {
 
   function photo(q, store) {
     var p = store.load('posts').filter(function (x) { return x.id === q.postId; })[0];
-    if (!p || !p.photoId || p.purged) fail('photo_gone');
-    return {image: store.getPhoto(p.photoId)};
+    var id = q.which === 'selfie' ? p && p.selfieId : p && p.photoId;
+    if (!p || !id || p.purged) fail('photo_gone');
+    return {image: store.getPhoto(id)};
   }
 
   function comment(q, store, me) {
@@ -288,7 +299,7 @@ var CORE = (function () {
     store.save('refs', refs); store.save('posts', posts); store.version(true);
     log(store, me.id, 'review', p.id + ' ' + p.status);
     var ok = mine.filter(function (r) { return r.status === 'approved'; }).length, R = rates(store);
-    if (ok && p.agentId !== me.id) store.push([p.agentId], {title: '💰 ' + ok + ' referral' + (ok === 1 ? '' : 's') + ' approved', body: 'RM' + (ok * R.lead) + ' bonus once you call each one within ' + CALL_DAYS + ' days. 📞 Call them now!', url: '#/leads', tag: 'approved-' + p.id});
+    if (ok && p.agentId !== me.id) store.push([p.agentId], {title: '💰 ' + ok + (p.source === 'roadshow' ? ' roadshow name' : ' referral') + (ok === 1 ? '' : 's') + ' approved', body: 'RM' + (ok * R.lead) + ' bonus once you call each one within ' + CALL_DAYS + ' days. 📞 Call them now!', url: '#/leads', tag: 'approved-' + p.id});
     return {status: p.status};
   }
 
@@ -299,6 +310,7 @@ var CORE = (function () {
     if (p.agentId !== me.id && !leader) fail('not_yours');
     if ((p.status === 'approved' || p.status === 'partial') && !leader) fail('approved_ask_leader');   // bonus already counted
     if (p.photoId && !p.purged) { try { store.trashPhoto(p.photoId); } catch (e) {} }
+    if (p.selfieId && !p.purged) { try { store.trashPhoto(p.selfieId); } catch (e) {} }
     store.save('posts', posts.filter(function (x) { return x.id !== p.id; }));
     store.save('refs', store.load('refs').filter(function (r) { return r.postId !== p.id; }));
     store.save('comments', store.load('comments').filter(function (c) { return c.postId !== p.id; }));
@@ -397,7 +409,8 @@ var CORE = (function () {
   }
 
   /* ---------- monthly bonus statement (same columns as the leader's sheet) ----------
-     Approach = referral pages posted + "asked, no names"   (counted, not paid)
+     Approach = referral pages + roadshow lists posted + "asked, no names"   (counted, not paid)
+     Roadshow names are leads too (same rates, same 14-day call rule); leadsRoadshow shows how many of the paid leads came from roadshows.
      Leads    = approved referral names posted that month AND called within 14 days   x lead rate
      Appt     = approved appointments dated that month       x appt rate
      Close    = approved closed cases dated that month       x close rate */
@@ -410,7 +423,7 @@ var CORE = (function () {
   }
   function bonusTable(agents, posts, refs, month, r, nowIso) {
     var nowMs = nowIso ? new Date(nowIso).getTime() : Date.now();
-    var rows = agents.map(function (a) { return {id: a.id, name: a.name, approach: 0, leads: 0, leadsWaiting: 0, leadsToCall: 0, leadsForfeit: 0, appt: 0, apptWaiting: 0, close: 0, closeWaiting: 0, total: 0}; });
+    var rows = agents.map(function (a) { return {id: a.id, name: a.name, approach: 0, leads: 0, leadsWaiting: 0, leadsToCall: 0, leadsForfeit: 0, leadsRoadshow: 0, appt: 0, apptWaiting: 0, close: 0, closeWaiting: 0, total: 0}; });
     var by = {}; rows.forEach(function (x) { by[x.id] = x; });
     posts.forEach(function (p) { var x = by[p.agentId]; if (x && (p.kind === 'approach' || (p.kind === 'referral' && p.status !== 'rejected')) && inMonth(p.created, month)) x.approach++; });
     refs.forEach(function (f) {
@@ -420,7 +433,7 @@ var CORE = (function () {
         if (cs === 'forfeit' || cs === 'late') x.leadsForfeit++;                // no call within 14 days: lead bonus forfeited
         else if (f.status !== 'approved') x.leadsWaiting++;                     // waiting leader approval
         else if (cs === 'due') x.leadsToCall++;                                  // approved, waiting for the call
-        else x.leads++;                                                          // approved + called in time = paid
+        else { x.leads++; if (f.source === 'roadshow') x.leadsRoadshow++; }       // approved + called in time = paid
       }
       if (inMonth(f.apptAt, month)) { if (f.appt === 'approved') x.appt++; else if (f.appt === 'pending') x.apptWaiting++; }
       if (inMonth(f.closeAt, month)) { if (f.close === 'approved') x.close++; else if (f.close === 'pending') x.closeWaiting++; }
@@ -508,7 +521,8 @@ var CORE = (function () {
     posts.forEach(function (p) {
       if (p.kind === 'referral' && !p.purged && daysAgo(store, p.created) >= KEEP_DAYS) {
         if (p.photoId) { try { store.trashPhoto(p.photoId); } catch (e) {} ph++; }
-        p.photoId = ''; p.giver = ''; p.purged = now;
+        if (p.selfieId) { try { store.trashPhoto(p.selfieId); } catch (e) {} }
+        p.photoId = ''; p.selfieId = ''; p.giver = ''; p.purged = now;
       }
     });
     if (n || ph) { store.save('refs', refs); store.save('posts', posts); store.version(true); log(store, 'system', 'purge', n + ' names wiped, ' + ph + ' photos deleted'); }
