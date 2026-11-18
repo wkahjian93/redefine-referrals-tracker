@@ -78,6 +78,10 @@ http.createServer((req, res) => {
     req.on('end', () => { const body = Buffer.concat(chunks).toString(); fs.writeFileSync(path.join(dir, name), name.endsWith('.json') ? body : Buffer.from(body, 'base64')); console.log('saved', name); res.end('ok'); });
     return;
   }
+  if (url === '/__owner-report') {   // local preview of the monthly owner email
+    const month = new URL(req.url, 'http://x').searchParams.get('month') || '2026-10';
+    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); return res.end(CORE.buildOwnerReport(store, month).html);
+  }
   if (url === '/config.js') { res.writeHead(200, {'Content-Type': 'text/javascript'}); return res.end("window.RRT_CONFIG={api:location.origin+'/gas',appUrl:location.origin+'/',sample:'SAMPLE · fake people · real referral-book format'};"); }
   let file;
   if (url.startsWith('/tools/')) file = path.join(__dirname, path.basename(url));

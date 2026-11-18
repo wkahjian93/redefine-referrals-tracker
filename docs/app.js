@@ -17,7 +17,7 @@
     server_not_set_up: 'The team server is not set up yet.', daily_limit: 'Daily photo limit reached. Try again tomorrow.', bad_photo: 'This photo could not be sent. Please retake it.',
     no_api_key: 'Photo reading is not switched on yet (leader: add the AI key).', bad_api_key: 'The AI key on the server is not working.', no_credit: 'The AI account has no credit left.',
     rate_limited: 'The AI is busy. Try again in a minute.', ai_unavailable: 'The AI could not be reached. Try again, or type the names yourself.', ai_bad_reply: 'The AI reply was unreadable. Try again, or type the names yourself.',
-    no_names: 'There are no names to post.', location_needed: 'Please type the roadshow location.', selfie_needed: 'Please take a selfie at the roadshow as proof.', selfie_missing: 'Waiting for the booth selfie. Approve after the agent adds it.', privacy_not_confirmed: 'Please tick the privacy check first.', photo_gone: 'This photo was auto-deleted (older than 3 months).',
+    no_names: 'There are no names to post.', location_needed: 'Please type the roadshow location.', selfie_needed: 'Please take a selfie at the roadshow as proof.', selfie_missing: 'Waiting for the booth selfie. Approve after the agent adds it.', no_owner_email: 'No owner email is set on the server yet.', privacy_not_confirmed: 'Please tick the privacy check first.', photo_gone: 'This photo was auto-deleted (older than 3 months).',
     leader_only: 'Only the leader can do this.', not_yours: 'You can only change your own posts.', approved_ask_leader: 'This page is already approved. Ask your leader to remove it.',
     not_found: 'This item no longer exists.', appointment_first: 'Mark the appointment first, then the close.', already_marked: 'Already marked.',
     lead_not_counted: 'This lead was not counted, so it has no steps.', undo_close_first: 'Undo the close first.', undo_appt_first: 'Undo the appointment first.', bad_rate: 'Rates must be numbers (RM).', network: 'No connection. Check your internet and try again.', server_error: 'Server problem. Please try again.'
@@ -540,7 +540,7 @@
   function roadshowStart() {
     var rs = S.rs = S.rs || {location: '', selfie: null}, places = LS.get('rsPlaces', []);
     var ready = rs.location.trim().length >= 3;
-    return '<div style="margin-bottom:10px"><a href="#" data-mode="">← Back</a></div><div class="card"><h2>🎪 Roadshow name list</h2><div class="faint">Same as referrals: the app reads the names, covers private details, RM' + S.data.rates.lead + ' per name once called within ' + (S.data.callDays || 14) + ' days.</div>' +
+    return modeBar('roadshow', true) + '<div class="card"><h2>🎪 Roadshow name list</h2><div class="faint">Same as referrals: the app reads the names, covers private details, RM' + S.data.rates.lead + ' per name once called within ' + (S.data.callDays || 14) + ' days.</div>' +
       '<label class="field"><span>1. 📍 Where is the roadshow?</span><input id="rs-loc" list="rs-places" maxlength="80" placeholder="e.g. Queensbay Mall, Level 1 atrium" value="' + esc(rs.location) + '"></label>' +
       '<datalist id="rs-places">' + places.map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') + '</datalist>' +
       '<div class="field"><span>2. 📋 Photo of the name list</span>' +
@@ -593,23 +593,39 @@
     }, function (e) { toast('Selfie not opened', e.message); });
   }
 
+  /* ---------- which list? Two very different cards so agents don't pick the wrong one ---------- */
+  var PIC_REF = '<svg viewBox="0 0 64 80" width="64" height="80" aria-hidden="true"><rect x="2" y="2" width="60" height="76" rx="4" fill="#3D55E0"/><rect x="7" y="7" width="50" height="66" rx="2" fill="#fff"/><rect x="11" y="11" width="26" height="4" rx="1" fill="#3D55E0"/><rect x="11" y="19" width="34" height="2" fill="#9AA6EE"/>' +
+    [26, 36, 46, 56, 66].map(function (y, i) { return '<text x="11" y="' + (y + 4) + '" font-size="6" font-family="Arial" fill="#3D55E0" font-weight="700">' + (i + 1) + '</text><rect x="18" y="' + y + '" width="22" height="2" fill="#C9CFF5"/><rect x="18" y="' + (y + 4) + '" width="16" height="2" fill="#C9CFF5"/><rect x="43" y="' + y + '" width="10" height="6" fill="none" stroke="#C9CFF5"/>'; }).join('') + '</svg>';
+  var PIC_RS = '<svg viewBox="0 0 64 80" width="64" height="80" aria-hidden="true"><path d="M4 26 L32 8 L60 26 Z" fill="#E8590C"/><path d="M4 26h56v6H4z" fill="#F08C4A"/>' +
+    [0, 1, 2, 3, 4, 5, 6].map(function (i) { return '<path d="M' + (4 + i * 8) + ' 32 q4 6 8 0" fill="' + (i % 2 ? '#fff' : '#E8590C') + '"/>'; }).join('') +
+    '<rect x="8" y="38" width="4" height="36" fill="#9a5a2b"/><rect x="52" y="38" width="4" height="36" fill="#9a5a2b"/><rect x="14" y="52" width="36" height="22" rx="2" fill="#FFE3D1" stroke="#E8590C"/><rect x="18" y="57" width="20" height="2" fill="#E8590C"/><rect x="18" y="62" width="26" height="2" fill="#F5B58C"/><rect x="18" y="67" width="22" height="2" fill="#F5B58C"/><circle cx="46" cy="46" r="5" fill="#16171C"/><rect x="42" y="51" width="8" height="10" rx="3" fill="#16171C"/></svg>';
+  function modeBar(mode, canChange) {
+    var rs = mode === 'roadshow';
+    return '<div class="mode-bar ' + (rs ? 'rs' : 'ref') + '"><span>You chose: <b>' + (rs ? '🎪 ROADSHOW LIST 路演名单' : '📒 REFERRAL PAGE 转介绍名单') + '</b></span>' + (canChange ? '<a href="#" data-mode="">Change</a>' : '') + '</div>';
+  }
+
   /* ---------- snap a referral page ---------- */
   function viewSnap() {
     var d = S.draft;
-    if (!d && !S.snapMode) return '<div class="card snap-hero"><h2>What did you get?</h2><p class="muted">Both count the same: RM' + S.data.rates.lead + ' per name once you call within ' + (S.data.callDays || 14) + ' days.</p>' +
-      '<button class="btn gold block" data-mode="referral" style="padding:16px">📒 Referral page<br><span style="font-weight:400;font-size:13px">Names a client referred to you</span></button><div style="height:10px"></div>' +
-      '<button class="btn block" data-mode="roadshow" style="padding:16px">🎪 Roadshow name list<br><span style="font-weight:400;font-size:13px">Names from a booth / event · place + selfie (selfie can come later)</span></button><div style="height:10px"></div>' +
-      '<button class="btn block" id="sn-approach">🙋 I asked a client but got no names</button></div>';
+    if (!d && !S.snapMode) return '<h2 style="margin:4px 2px 2px">Which list did you get?</h2><div class="muted" style="margin:0 2px 12px">你拿到的是哪一种名单？ Choose carefully: it decides how the names are counted.</div>' +
+      '<button class="pick-card ref" data-mode="referral">' + PIC_REF + '<div><div class="pick-t">📒 REFERRAL PAGE</div><div class="pick-zh">转介绍名单</div><div class="pick-d">A <b>client</b> wrote their friends / family in the <b>blue REDEFINE referral booklet</b>.</div><div class="pick-tag">✔ "Your Name" at the top · rows 1 to 5</div></div></button>' +
+      '<button class="pick-card rs" data-mode="roadshow">' + PIC_RS + '<div><div class="pick-t">🎪 ROADSHOW LIST</div><div class="pick-zh">路演名单</div><div class="pick-d">Names <b>strangers left at a booth / event</b>: sign-up sheet, survey or lucky-draw forms.</div><div class="pick-tag">✔ Needs the place + a selfie at the booth</div></div></button>' +
+      '<div class="faint" style="margin:6px 2px 12px">Not sure? Referral = someone you know gave you the names. Roadshow = you collected them from the public.</div>' +
+      '<button class="btn block" id="sn-approach">🙋 I asked a client but got no names</button>';
     if (!d && S.snapMode === 'roadshow') return roadshowStart();
-    if (!d) return '<div style="margin-bottom:10px"><a href="#" data-mode="">← Back</a></div><div class="card snap-hero"><div class="big-ico">📒</div><h2>Snap your referral page</h2><p class="muted">Take a photo of the filled referral list. The app reads the names, counts them for you, and covers phone numbers, ages, remarks and faces before your team sees it.</p>' +
+    if (!d) return modeBar('referral', true) + '<div class="card snap-hero"><div class="big-ico">📒</div><h2>Snap your referral page</h2><p class="muted">Take a photo of the filled referral list. The app reads the names, counts them for you, and covers phone numbers, ages, remarks and faces before your team sees it.</p>' +
       '<label class="btn gold block">📷 Take photo<input type="file" accept="image/*" capture="environment" hidden data-file></label><div style="height:8px"></div>' +
       '<label class="btn block">🖼 Choose from gallery<input type="file" accept="image/*" hidden data-file></label>' +
       '<ul class="steps faint" style="text-align:left;margin-top:16px"><li>✔ Lay the page flat, in good light, whole page in the photo.</li><li>✔ The original photo is not saved. Only the covered one is.</li><li>✔ Phone numbers, age and remarks auto-delete after 3 months. Names stay.</li></ul></div>';
-    if (d.stage === 'busy') return '<div class="card snap-hero"><div class="spinner"></div><h2>' + esc(d.msg) + '</h2><ul class="steps muted">' + d.steps.map(function (s) { return '<li>' + s + '</li>'; }).join('') + '</ul></div>';
+    if (d.stage === 'busy') return modeBar(d.source, false) + '<div class="card snap-hero"><div class="spinner"></div><h2>' + esc(d.msg) + '</h2><ul class="steps muted">' + d.steps.map(function (s) { return '<li>' + s + '</li>'; }).join('') + '</ul></div>';
     if (d.stage === 'failed') return '<div class="card"><h2>Could not read the photo</h2><div class="notice bad">' + esc(d.error) + '</div><div class="actions"><button class="btn primary" id="sn-retry">Try again</button><button class="btn" id="sn-manual">Type the names myself</button><button class="btn" id="sn-cancel">Cancel</button></div></div>';
     var rows = d.rows, n = rows.filter(function (r) { return r.name.trim().length >= 2; }).length, unclear = rows.filter(function (r) { return r.unclear; }).length;
     var rsd = d.source === 'roadshow';
-    var html = (rsd ? '<div class="card"><h2>🎪 Roadshow</h2><label class="field"><span>📍 Roadshow location</span><input id="sn-loc" value="' + esc(d.location) + '" maxlength="80"></label>' +
+    var wrong = rsd && d.kind === 'referral_page' ? 'referral' : !rsd && d.kind === 'roadshow_list' ? 'roadshow' : '';
+    var html = modeBar(d.source, false) +
+      (wrong ? '<div class="notice bad" style="font-size:14.5px">⚠️ <b>This looks like a ' + (wrong === 'roadshow' ? 'ROADSHOW list' : 'REFERRAL booklet page') + '</b>, but you chose ' + (rsd ? 'Roadshow' : 'Referral') + '.' + '<div style="margin-top:8px"><button class="btn sm ' + (wrong === 'roadshow' ? 'gold' : 'primary') + '" data-switch="' + wrong + '">Switch to ' + (wrong === 'roadshow' ? '🎪 Roadshow' : '📒 Referral') + '</button> <button class="btn sm" data-keep>No, keep ' + (rsd ? 'Roadshow' : 'Referral') + '</button></div></div>' : '') +
+      '<div class="faint" style="margin:0 2px 8px">Wrong type? <a href="#" data-switch="' + (rsd ? 'referral' : 'roadshow') + '">Change to ' + (rsd ? '📒 Referral page' : '🎪 Roadshow list') + '</a></div>' +
+      (rsd ? '<div class="card"><h2>🎪 Roadshow</h2><label class="field"><span>📍 Roadshow location</span><input id="sn-loc" value="' + esc(d.location) + '" maxlength="80"></label>' +
       (d.selfie ? '<div class="faint">Selfie (proof). Your face stays visible; other people\'s faces are covered 🙂. Tap a cover to remove it, drag to add one.</div>' +
         '<div class="canvas-wrap" style="margin-top:8px;max-width:260px"><canvas id="sn-selfie"></canvas></div>'
         : '<label class="btn sm">🤳 Add booth selfie now<input type="file" accept="image/*" capture="user" hidden data-dselfie></label><div class="faint" style="margin-top:4px">Or add it later from your post. Your leader approves once the selfie is in.</div>') + '</div>' : '') +
@@ -652,6 +668,8 @@
     if (d.stage !== 'review') return;
     var cv = q('#sn-canvas'); REDACT.render(d.canvas, d.boxes, cv); wireDraw(cv, d);
     q('#sn-undo').onclick = function () { for (var i = d.boxes.length - 1; i >= 0; i--) if (!d.boxes[i].off) { d.boxes[i].off = true; break; } render(); };
+    root.querySelectorAll('[data-switch]').forEach(function (b) { b.onclick = function (e) { e.preventDefault(); var to = b.dataset.switch; d.source = to; S.snapMode = to; d.kind = ''; if (to === 'referral') d.giver = d.aiGiver || ''; else { d.giver = ''; d.location = d.location || (S.rs && S.rs.location) || ''; } d.ok = false; render(); toast(to === 'roadshow' ? 'Changed to 🎪 Roadshow' : 'Changed to 📒 Referral', to === 'roadshow' ? 'Type the roadshow place. The selfie can come later.' : 'Check the client name at "Your Name".'); }; });
+    if (q('[data-keep]')) q('[data-keep]').onclick = function () { d.kind = ''; render(); };
     if (q('#sn-giver')) q('#sn-giver').oninput = function (e) { d.giver = e.target.value; };
     if (q('#sn-loc')) q('#sn-loc').oninput = function (e) { d.location = e.target.value; };
     root.querySelectorAll('[data-dselfie]').forEach(function (inp) { inp.onchange = function () { if (!inp.files[0]) return; toast('Checking selfie…', ''); processSelfie(inp.files[0]).then(function (sf) { d.selfie = sf; render(); }, function (e) { toast('Selfie not opened', e.message); }); }; });
@@ -696,7 +714,7 @@
     var ai = api('read', {image: REDACT.b64(d.canvas, 0.85)}).then(function (r) { d.steps[0] = '✔ ' + r.read.rows.length + ' names found'; d.steps[1] = '✔ ' + r.read.private.length + ' private spots found'; render(); return r.read; });
     Promise.all([ai, face]).then(function (res) {
       var r = res[0];
-      d.rows = r.rows; d.giver = d.source === 'roadshow' ? '' : r.giver; d.notes = r.notes; d.manual = false;
+      d.kind = r.kind; d.aiGiver = r.giver; d.rows = r.rows; d.giver = d.source === 'roadshow' ? '' : r.giver; d.notes = r.notes; d.manual = false;
       d.boxes = r.private.map(function (b) { return {kind: 'private', type: b.type, x: b.x, y: b.y, w: b.w, h: b.h}; })
         .concat(res[1]).concat(r.faces.map(function (b) { return {kind: 'face', x: b.x, y: b.y, w: b.w, h: b.h}; }));
       d.stage = 'review'; render();
@@ -934,7 +952,7 @@
     if (paid && me.leader && paid.total !== sum('total')) html += '<div class="notice warn">Numbers changed after you marked it paid (paid RM' + paid.total + ', now RM' + sum('total') + '). Check late approvals.</div>';
     if (me.leader) html += '<div class="actions"><button class="btn sm" id="bn-csv">Download spreadsheet (CSV)</button>' +
       (paid ? '<button class="btn sm danger" id="bn-unpaid">Undo paid</button>' : '<button class="btn sm primary" id="bn-paid">Mark ' + monthName(mk) + ' as paid</button>') +
-      '<button class="btn sm wa" id="bn-report">📊 Share ' + monthName(mk) + ' report to WhatsApp</button><button class="btn sm wa" id="bn-remind">Remind team on WhatsApp</button></div>' +
+      '<button class="btn sm wa" id="bn-report">📊 Share ' + monthName(mk) + ' report to WhatsApp</button><button class="btn sm wa" id="bn-remind">Remind team on WhatsApp</button><button class="btn sm" id="bn-email">📧 Email this report to the owner</button></div>' +
       (!paid && mk < curMonth() ? '<div class="notice warn" style="margin-top:8px">💰 Reminder: pay each agent the amount in the Total column, then tap <b>Mark ' + monthName(mk) + ' as paid</b> so they see it.</div>' : '');
     return html + '</div>';
   }
@@ -959,6 +977,11 @@
     };
     if (q('#bn-remind')) q('#bn-remind').onclick = function () { remindWhatsApp(); };
     if (q('#bn-report')) q('#bn-report').onclick = function () { reportWhatsApp(mk); };
+    if (q('#bn-email')) q('#bn-email').onclick = function () {
+      confirmBox('Email the ' + monthName(mk) + ' report?', 'The payment report (who to pay how much, pending items, team summary, spreadsheet) goes to the owner email set on the server.', 'Send email').then(function (y) {
+        if (y) api('emailReport', {month: mk}).then(function (r) { toast('Email sent 📧', monthName(mk) + ' report · RM' + r.total); }).catch(function (e) { toast('Not sent', errText(e)); });
+      });
+    };
   };
   /* Monthly report for the team WhatsApp group (the leader can edit it before sending) */
   function reportWhatsApp(mk) {

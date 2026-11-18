@@ -250,6 +250,15 @@ ok(s5.pushes.length === 1 && s5.pushes[0].ids[0] === lid && /Oct 2026/.test(s5.p
 ok(/pay/.test(s5.pushes[0].note.body), 'reminds the leader to pay');
 c5(Object.assign({op: 'markPaid', month: '2026-10', confirm: true}, l5)); s5.pushes.length = 0; CORE.monthlyReport(s5);
 ok(/paid ✅/.test(s5.pushes[0].note.title), 'already-paid month says so');
+ok(!s5.mails.length, 'no owner email when OWNER_EMAIL is not set');
+s5.props.OWNER_EMAIL = 'owner@example.com';
+s5.tables.settings = s5.tables.settings.filter(x => x.key !== 'paid_2026-10'); CORE.monthlyReport(s5);
+const em = s5.mails[0];
+ok(em && em.to === 'owner@example.com' && /Oct 2026 payment report/.test(em.subject) && /RM2.00 to 1 agent/.test(em.subject), 'owner gets the Oct payment report email (' + (em && em.subject) + ')');
+ok(/Who to pay/.test(em.html) && /Report Agent/.test(em.html) && /Every agent/.test(em.html) && !/012/.test(em.html), 'email has who-to-pay, every agent, no phone numbers');
+ok(/Report Agent",1,2,0,0,2.00/.test(em.csv) && em.csvName === 'prospecting-bonus-2026-10.csv', 'CSV attached with the payment row');
+ok(CORE.handle(Object.assign({op: 'emailReport', month: '2026-10'}, l5), s5).emailed && s5.mails.length === 2, 'leader can email the report on demand');
+err(() => CORE.handle(Object.assign({op: 'emailReport', month: '2026-10'}, a5), s5), 'leader_only', 'agent cannot email the report');
 
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');

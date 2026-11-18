@@ -18,7 +18,7 @@
 5. Tick **"I checked the photo…"** → **Post** → **Post it**.
 6. 🎉 You get your encouragement, and the team sees your update straight away. Tap **Share to WhatsApp** if you want to tell the group. WhatsApp opens and you pick the group.
 
-**Got names at a roadshow?** Tap 📷 Snap → **🎪 Roadshow name list**:
+**Got names at a roadshow?** Tap 📷 Snap → pick the **orange 🎪 ROADSHOW LIST** card (the blue 📒 card is for referral booklet pages). If you pick the wrong one, the app warns you after reading the photo and lets you switch with one tap:
 1. Type the **📍 roadshow location** (the app remembers places you used before).
 2. Snap the **name list**. Everything after that is the same as a referral page: names counted, private details covered, leader approves, RM1 per name once you call within 14 days, ☕ appointment RM5, 🎯 close RM20.
 3. **🤳 Selfie at the booth** as proof: take it now, or later from your post ("Add booth selfie"). Your face stays visible; other people's faces are covered 🙂. Your leader can approve only after the selfie is in, and gets a pop-up when you add it.
@@ -62,6 +62,7 @@
   - **Download spreadsheet (CSV)** for your records.
   - After you pay: **Mark [month] as paid**. Each agent sees their paid amount. If late approvals change a paid month, the app warns you.
   - **📊 Share report to WhatsApp** writes the month's report for the group: team names (incl. roadshows), appointments, closes, top prospector, each agent's bonus and the total.
+  - **📧 Email this report to the owner**: the full payment report (who to pay how much, items still pending, team summary, every agent, spreadsheet attached). It is also emailed automatically on the 5th.
   - **On the 5th of every month at 9am** you get a lock-screen pop-up with last month's total. Tap it → share the report → pay → **Mark as paid**.
   - **Remind team on WhatsApp** prepares a message with the rates, the days left and who hasn't posted this month.
 - **Your reminders** (top of Feed, pop-up once a day): items waiting approval; last month's bonus ready to pay (1st–10th) until you mark it paid; month closing in 5 days → send the WhatsApp reminder.

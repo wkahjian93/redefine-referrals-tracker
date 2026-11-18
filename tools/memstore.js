@@ -7,7 +7,8 @@ module.exports = function memStore(opts = {}) {
   const store = {
     tables, photos, props, prompts: [], pushes: [],
     push: (ids, note) => { if (ids && ids.length) store.pushes.push({ids, note}); },   // phone pop-ups are recorded, not sent
-    sleep: () => {},
+    sleep: () => {}, mails: [],
+    mail: (to, subject, html, csv, csvName) => { store.mails.push({to, subject, html, csv, csvName}); },
     load: t => JSON.parse(JSON.stringify(tables[t] || [])),
     save: (t, rows) => { tables[t] = JSON.parse(JSON.stringify(rows)); },
     withLock: fn => fn(),

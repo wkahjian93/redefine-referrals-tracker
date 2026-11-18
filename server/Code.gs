@@ -530,6 +530,68 @@ var CORE = (function () {
     return {reminded: n};
   }
 
+  /* ---------- monthly payment report emailed to the owner (Script property OWNER_EMAIL) ---------- */
+  function h(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); }
+  function buildOwnerReport(store, month) {
+    var names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], mm = month.split('-'), label = names[+mm[1] - 1] + ' ' + mm[0];
+    var R = rates(store), now = nowIso(store), agents = store.load('agents').filter(function (a) { return String(a.active) !== 'false'; });
+    var posts = store.load('posts'), refs = store.load('refs'), rows = bonusTable(agents, posts, refs, month, R, now);
+    var sum = function (k) { return rows.reduce(function (t, x) { return t + x[k]; }, 0); };
+    var monthRefs = refs.filter(function (r) { return r.status !== 'rejected' && inMonth(r.created, month); });
+    var rsNames = monthRefs.filter(function (r) { return r.source === 'roadshow'; }).length;
+    var places = {}; posts.forEach(function (p) { if (p.source === 'roadshow' && p.kind === 'referral' && inMonth(p.created, month) && p.location) places[p.location] = (places[p.location] || 0) + (+p.count || 0); });
+    var called = monthRefs.filter(function (r) { return r.calledAt; }).length;
+    var earners = rows.filter(function (x) { return x.total; }).sort(function (a, b) { return b.total - a.total; });
+    var total = sum('total'), paidRaw = setting(store, 'paid_' + month), paid = null; try { paid = paidRaw ? JSON.parse(paidRaw) : null; } catch (e) {}
+    var pct = function (a, b) { return b ? Math.round(a / b * 100) + '%' : '–'; };
+    var act = rows.map(function (x) { return {name: x.name, names: x.leads + x.leadsToCall + x.leadsWaiting + x.leadsForfeit, x: x}; }).sort(function (a, b) { return b.names - a.names || a.name.localeCompare(b.name); });
+    var top = act[0] && act[0].names ? act[0] : null;
+    var td = 'style="padding:6px 8px;border-bottom:1px solid #e5e1d8"', tdr = 'style="padding:6px 8px;border-bottom:1px solid #e5e1d8;text-align:right"', th = 'style="padding:6px 8px;text-align:left;background:#0B0C10;color:#fff;font-weight:600"', thr = 'style="padding:6px 8px;text-align:right;background:#0B0C10;color:#fff;font-weight:600"';
+    var link = (store.prop('APP_URL') || 'https://wkahjian93.github.io/redefine-referrals-tracker/') + '#/bonus/' + month;
+    var html = '<div style="font-family:Arial,Helvetica,sans-serif;color:#16171C;max-width:720px">' +
+      '<h2 style="margin:0 0 4px">REDEFINE Prospecting · ' + label + ' payment report</h2>' +
+      '<div style="color:#6B6A66;margin-bottom:14px">Rates: Lead RM' + R.lead + ' (called within 14 days) · Appointment RM' + R.appt + ' · Close RM' + R.close + '. Only leader-approved items are paid.</div>' +
+      '<div style="background:' + (paid ? '#E3F4EA' : '#FFF1D6') + ';border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:16px"><b>' + (paid ? '✅ Marked paid on ' + h(String(paid.at).slice(0, 10)) + ' (RM' + paid.total + ')' : '💰 To pay: RM' + total.toFixed(2) + ' to ' + earners.length + ' agent' + (earners.length === 1 ? '' : 's')) + '</b>' +
+      (!paid ? '<div style="font-size:13px;margin-top:4px">After paying, open the app → Board → bonus → <b>Mark ' + label + ' as paid</b>.</div>' : '') + '</div>' +
+      '<h3 style="margin:18px 0 6px">1. Who to pay</h3><table style="border-collapse:collapse;width:100%;font-size:14px"><tr><th ' + th + '>#</th><th ' + th + '>Agent</th><th ' + thr + '>Leads</th><th ' + thr + '>Appt</th><th ' + thr + '>Close</th><th ' + thr + '>Pay (RM)</th></tr>' +
+      (earners.length ? earners.map(function (x, i) { return '<tr><td ' + td + '>' + (i + 1) + '</td><td ' + td + '>' + h(x.name) + '</td><td ' + tdr + '>' + x.leads + (x.leadsRoadshow ? ' <span style="color:#6B6A66">(' + x.leadsRoadshow + ' 🎪)</span>' : '') + '</td><td ' + tdr + '>' + x.appt + '</td><td ' + tdr + '>' + x.close + '</td><td ' + tdr + '><b>' + x.total.toFixed(2) + '</b></td></tr>'; }).join('')
+        : '<tr><td ' + td + ' colspan="6">No approved bonus for ' + label + '.</td></tr>') +
+      '<tr><td ' + td + '></td><td ' + td + '><b>Total</b></td><td ' + tdr + '><b>' + sum('leads') + '</b></td><td ' + tdr + '><b>' + sum('appt') + '</b></td><td ' + tdr + '><b>' + sum('close') + '</b></td><td ' + tdr + '><b>RM' + total.toFixed(2) + '</b></td></tr></table>' +
+      '<h3 style="margin:18px 0 6px">2. Not in this payment (yet)</h3><ul style="margin:0;padding-left:18px;font-size:14px">' +
+      '<li>Waiting your approval: <b>' + (sum('leadsWaiting') + sum('apptWaiting') + sum('closeWaiting')) + '</b> item(s)</li>' +
+      '<li>Approved names not called yet (still inside 14 days, may still be paid for ' + label + '): <b>' + sum('leadsToCall') + '</b></li>' +
+      '<li>Forfeited (not called within 14 days): <b>' + sum('leadsForfeit') + '</b> name(s)</li></ul>' +
+      '<h3 style="margin:18px 0 6px">3. Team summary</h3><ul style="margin:0;padding-left:18px;font-size:14px">' +
+      '<li>New names: <b>' + monthRefs.length + '</b> (' + (monthRefs.length - rsNames) + ' referrals · ' + rsNames + ' roadshow)</li>' +
+      '<li>Approaches: <b>' + sum('approach') + '</b> · names per approach ' + (sum('approach') ? (monthRefs.length / sum('approach')).toFixed(1) : '–') + '</li>' +
+      '<li>Called: <b>' + called + '</b> (' + pct(called, monthRefs.length) + ') · Appointments: <b>' + sum('appt') + '</b> · Closes: <b>' + sum('close') + '</b> (' + pct(sum('close'), sum('appt')) + ' of appointments)</li>' +
+      '<li>Active agents: <b>' + act.filter(function (a) { return a.x.approach; }).length + '</b> of ' + rows.length + (top ? ' · Top prospector: <b>' + h(top.name) + '</b> (' + top.names + ' names)' : '') + '</li>' +
+      (Object.keys(places).length ? '<li>Roadshows: ' + Object.keys(places).map(function (p) { return h(p) + ' (' + places[p] + ')'; }).join(', ') + '</li>' : '') + '</ul>' +
+      '<h3 style="margin:18px 0 6px">4. Every agent</h3><table style="border-collapse:collapse;width:100%;font-size:13px"><tr><th ' + th + '>Agent</th><th ' + thr + '>Approach</th><th ' + thr + '>Names</th><th ' + thr + '>To call</th><th ' + thr + '>Forfeit</th><th ' + thr + '>Appt</th><th ' + thr + '>Close</th></tr>' +
+      act.map(function (a) { var x = a.x; return '<tr><td ' + td + '>' + h(a.name) + '</td><td ' + tdr + '>' + x.approach + '</td><td ' + tdr + '>' + a.names + '</td><td ' + tdr + '>' + x.leadsToCall + '</td><td ' + tdr + '>' + x.leadsForfeit + '</td><td ' + tdr + '>' + (x.appt + x.apptWaiting) + '</td><td ' + tdr + '>' + (x.close + x.closeWaiting) + '</td></tr>'; }).join('') + '</table>' +
+      '<p style="margin-top:18px"><a href="' + h(link) + '" style="background:#E8B04B;color:#0B0C10;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">Open the ' + label + ' bonus sheet</a></p>' +
+      '<p style="color:#6B6A66;font-size:12px">Spreadsheet attached. Sent automatically by REDEFINE Prospecting on the 5th of each month. Client phone numbers are never included.</p></div>';
+    var csv = ['Agent,Approach,Leads paid (RM' + R.lead + '),Appointments (RM' + R.appt + '),Closes (RM' + R.close + '),Pay RM,Leads to call,Leads forfeited,Waiting approval,Roadshow leads paid'].concat(rows.map(function (x) {
+      return ['"' + String(x.name).replace(/"/g, '""') + '"', x.approach, x.leads, x.appt, x.close, x.total.toFixed(2), x.leadsToCall, x.leadsForfeit, x.leadsWaiting + x.apptWaiting + x.closeWaiting, x.leadsRoadshow].join(',');
+    })).join('\n');
+    return {subject: 'REDEFINE Prospecting · ' + label + ' payment report · ' + (paid ? 'paid ✅' : 'RM' + total.toFixed(2) + ' to ' + earners.length + ' agent' + (earners.length === 1 ? '' : 's')),
+      html: html, csv: '﻿' + csv, csvName: 'prospecting-bonus-' + month + '.csv', total: total, earners: earners.length};
+  }
+  function emailOwner(store, month) {
+    var to = store.prop('OWNER_EMAIL'); if (!to || !store.mail) return {emailed: false, reason: 'no_owner_email'};
+    var r = buildOwnerReport(store, month);
+    store.mail(to, r.subject, r.html, r.csv, r.csvName);
+    log(store, 'system', 'owner_email', month + ' RM' + r.total);
+    return {emailed: true, total: r.total};
+  }
+  /* leader: "Email me this report now" for any month */
+  function emailReport(q, store, me, leader) {
+    if (!leader) fail('leader_only');
+    var month = str(q.month, 7); if (!/^\d{4}-\d{2}$/.test(month)) fail('bad_request');
+    var r = emailOwner(store, month); if (!r.emailed) fail('no_owner_email');
+    return r;
+  }
+
   /* Monthly report (trigger on the 5th, 9am): every leader gets a lock-screen pop-up with last month's bonus total,
      opening the bonus sheet where they share the report to the WhatsApp group and mark it paid. */
   function monthlyReport(store) {
@@ -540,12 +602,13 @@ var CORE = (function () {
     var total = 0, paidAgents = 0, names_ = 0, waiting = 0;
     rows.forEach(function (x) { total += x.total; if (x.total) paidAgents++; names_ += x.leads + x.leadsToCall + x.leadsWaiting + x.leadsForfeit; waiting += x.leadsWaiting + x.apptWaiting + x.closeWaiting; });
     var paid = setting(store, 'paid_' + month), leaders = agents.filter(function (a) { return a.role === 'leader'; }).map(function (a) { return a.id; });
-    if (!leaders.length) return {month: month, sent: 0};
+    var mail = emailOwner(store, month);
+    if (!leaders.length) return {month: month, sent: 0, emailed: mail.emailed};
     store.push(leaders, {title: '📊 ' + label + ' prospecting report' + (paid ? ' (paid ✅)' : ''),
       body: names_ + ' names · bonus RM' + total + ' for ' + paidAgents + ' agent' + (paidAgents === 1 ? '' : 's') + '. ' + (paid ? 'Tap to view and share to WhatsApp.' : 'Tap to view, share to WhatsApp, then pay and mark as paid.') + (waiting ? ' ' + waiting + ' item(s) still waiting your approval.' : ''),
       url: '#/bonus/' + month, tag: 'monthly-' + month});
     log(store, 'system', 'monthly_report', month + ' RM' + total);
-    return {month: month, total: total, agents: paidAgents, sent: leaders.length};
+    return {month: month, total: total, agents: paidAgents, sent: leaders.length, emailed: mail.emailed};
   }
 
   /* ---------- 3-month auto-delete (daily trigger) ---------- */
@@ -572,7 +635,7 @@ var CORE = (function () {
     return {wiped: n, photos: ph};
   }
 
-  var OPS = {addSelfie: addSelfie, pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
+  var OPS = {emailReport: emailReport, addSelfie: addSelfie, pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
 
   function handle(q, store) {
     if (!q || typeof q !== 'object') fail('bad_request');
@@ -594,7 +657,7 @@ var CORE = (function () {
     return store.withLock(function () { var w = who(q, store); var r = fn(q, store, w.me, w.leader); r.ok = true; return r; });
   }
 
-  return {monthlyReport: monthlyReport, PHOTO_DAYS: PHOTO_DAYS, callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
+  return {buildOwnerReport: buildOwnerReport, monthlyReport: monthlyReport, PHOTO_DAYS: PHOTO_DAYS, callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
 })();
 
 /* ===== server/gas.js ===== */
@@ -607,6 +670,7 @@ var CORE = (function () {
      DAILY_READS     optional, photo readings per agent per day (default 40)
      FCM_SERVICE_ACCOUNT  for lock-screen pop-ups: the whole Firebase service-account JSON (the same one the REDEFINE Calendar uses)
      APP_URL         optional, the app link used when a pop-up is tapped (default the GitHub Pages link)
+     OWNER_EMAIL     optional, gets the monthly payment report by email on the 5th (kept here, not in the public code)
    Data: private Google Sheet "REDEFINE Referrals Data" and Drive folder "REDEFINE Referrals Photos"
    (only the covered/censored photos). Both are created by setup(), which also installs the daily auto-delete. */
 
@@ -748,6 +812,7 @@ var GAS = (function () {
     putPhoto: function (name, b64) { return folder().createFile(Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', name)).getId(); },
     getPhoto: function (id) { return Utilities.base64Encode(DriveApp.getFileById(id).getBlob().getBytes()); },
     trashPhoto: function (id) { DriveApp.getFileById(id).setTrashed(true); },   // Drive empties trash after 30 days
+    mail: function (to, subject, html, csv, csvName) { MailApp.sendEmail({to: to, subject: subject, htmlBody: html, name: 'REDEFINE Prospecting', attachments: csv ? [Utilities.newBlob(csv, 'text/csv', csvName || 'report.csv')] : []}); },
     ai: ai, flushPush: flushPush, sleep: function (ms) { Utilities.sleep(ms); },
     push: function (ids, note) { if (ids && ids.length) outbox.push({ids: ids, note: note}); }
   };
@@ -758,7 +823,7 @@ var GAS = (function () {
 function dailyCallReminder() { var r = GAS.withLock(function () { return CORE.callReminders(GAS); }); GAS.flushPush(); console.log('Call reminders: ' + r.reminded + ' agent(s)'); }
 
 /* Runs on the 5th of every month at 9am (installed by setup): last month's report + pay reminder to the leader(s). */
-function monthlyReport() { var r = GAS.withLock(function () { return CORE.monthlyReport(GAS); }); GAS.flushPush(); console.log('Monthly report ' + r.month + ': RM' + r.total + ' to ' + r.agents + ' agent(s), sent to ' + r.sent + ' leader(s)'); }
+function monthlyReport() { var r = GAS.withLock(function () { return CORE.monthlyReport(GAS); }); GAS.flushPush(); console.log('Monthly report ' + r.month + ': RM' + r.total + ' to ' + r.agents + ' agent(s), sent to ' + r.sent + ' leader(s), owner email ' + (r.emailed ? 'sent' : 'not set')); }
 
 function dailyPurge() { GAS.withLock(function () { var r = CORE.purge(GAS); console.log('Auto-delete: ' + r.wiped + ' names wiped, ' + r.photos + ' photos deleted'); }); }
 
@@ -766,6 +831,7 @@ function dailyPurge() { GAS.withLock(function () { var r = CORE.purge(GAS); cons
 function setup() {
   Object.keys(CORE.TABLES).forEach(function (t) { GAS.load(t); });
   DriveApp.getRootFolder();
+  MailApp.getRemainingDailyQuota();   // asks for permission to send the monthly report email
   UrlFetchApp.fetch('https://api.openai.com/v1/models', {muteHttpExceptions: true});
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'dailyPurge' || t.getHandlerFunction() === 'dailyCallReminder' || t.getHandlerFunction() === 'monthlyReport') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('monthlyReport').timeBased().onMonthDay(5).atHour(9).inTimezone('Asia/Kuala_Lumpur').create();
