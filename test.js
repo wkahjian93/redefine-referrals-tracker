@@ -260,6 +260,25 @@ ok(/Report Agent",1,2,0,0,2.00/.test(em.csv) && em.csvName === 'prospecting-bonu
 ok(CORE.handle(Object.assign({op: 'emailReport', month: '2026-10'}, l5), s5).emailed && s5.mails.length === 2, 'leader can email the report on demand');
 err(() => CORE.handle(Object.assign({op: 'emailReport', month: '2026-10'}, a5), s5), 'leader_only', 'agent cannot email the report');
 
+// several photos in one referral record
+const s6 = memStore({now: () => Date.parse('2026-11-18T02:00:00Z')}), c6 = q => CORE.handle(q, s6);
+const a6 = {code: 'test-team', name: 'Multi Agent', pin: '5656'}, l6 = {code: 'test-leader-code', name: 'Multi Lead', pin: '7878'};
+c6(Object.assign({op: 'signin', create: true}, a6)); c6(Object.assign({op: 'signin', create: true}, l6));
+const P2 = 'B'.repeat(400), P3 = 'C'.repeat(400);
+const m6 = c6(Object.assign({op: 'post', photos: [PHOTO, P2, P3], covered: true, rows: [{name: 'Page One A'}, {name: 'Page Two B'}, {name: 'Page Three C'}]}, a6));
+ok(m6.post.photoId.split(',').length === 3 && m6.post.count === 3, 'one record holds 3 photos and 3 names');
+ok(c6(Object.assign({op: 'sync'}, l6)).posts.find(p => p.id === m6.post.id).photo === 3, 'app is told there are 3 photos');
+ok(c6(Object.assign({op: 'photo', postId: m6.post.id, idx: 1}, l6)).image === P2 && c6(Object.assign({op: 'photo', postId: m6.post.id, idx: 2}, l6)).image === P3, 'each photo can be opened');
+err(() => c6(Object.assign({op: 'post', photos: [PHOTO, 'bad'], covered: true, rows: [{name: 'X Y'}]}, a6)), 'bad_photo', 'a broken photo in the set is refused');
+const many = c6(Object.assign({op: 'post', photos: [PHOTO, PHOTO, PHOTO, PHOTO, PHOTO, PHOTO, PHOTO, PHOTO], covered: true, rows: [{name: 'Max Six'}]}, a6));
+ok(many.post.photoId.split(',').length === 6, 'at most 6 photos per record');
+c6(Object.assign({op: 'removePost', postId: many.post.id, confirm: true}, a6));
+const r6 = s6.tables.refs.filter(r => r.postId === m6.post.id), d6 = {}; r6.forEach(r => { d6[r.id] = 'approved'; });
+c6(Object.assign({op: 'review', postId: m6.post.id, confirm: true, decisions: d6}, l6));
+s6.setNow('2026-12-19T03:00:00Z'); CORE.purge(s6);
+ok(Object.keys(s6.photos).length === 0, 'all photos deleted (30 days after approval, and on delete)');
+ok(c6(Object.assign({op: 'sync'}, l6)).posts.find(p => p.id === m6.post.id).photo === 0, 'no photos left after 30 days');
+
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');
 call(Object.assign({op: 'removeAgent', agentId: meiAgent.id, confirm: true}, gm));

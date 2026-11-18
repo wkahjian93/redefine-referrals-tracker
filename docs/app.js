@@ -352,7 +352,7 @@
     var selfie = needSelfie ? (p.agentId === me.id ? '<div class="notice warn" style="margin-top:8px">🤳 Booth selfie missing. Your leader can approve after you add it.<div style="margin-top:6px"><label class="btn sm gold">🤳 Add booth selfie<input type="file" accept="image/*" capture="user" hidden data-addselfie="' + p.id + '"></label> <label class="btn sm">🖼 From gallery<input type="file" accept="image/*" hidden data-addselfie="' + p.id + '"></label></div></div>' : '<div class="faint" style="margin-top:8px">🤳 Booth selfie coming</div>')
       : p.source === 'roadshow' && p.selfie && !p.purged ? '<div class="photo-box" data-photo="' + p.id + '" data-which="selfie" style="max-width:220px">' + (S.photos[p.id + ':s'] ? '<img alt="Selfie at the roadshow" src="data:image/jpeg;base64,' + S.photos[p.id + ':s'] + '">' : 'Tap to load the selfie') + '</div>' : '';
     var photo = p.purged ? '<div class="photo-box">Photo and contact details auto-deleted after 3 months · names kept</div>'
-      : p.photo ? '<div class="photo-box" data-photo="' + p.id + '">' + (S.photos[p.id] ? '<img alt="Referral page, private details covered" src="data:image/jpeg;base64,' + S.photos[p.id] + '">' : 'Tap to load the covered photo') + '</div>'
+      : p.photo ? photoStrip(p)
       : p.photoRemoved ? '<div class="photo-box">📷 Photo removed ' + (p.photoDays || 30) + ' days after approval (saves space) · names kept</div>'
       : '<div class="photo-box">Sample post · no photo</div>';
     return '<div class="card" id="p-' + p.id + '"><div class="row">' + avatar(p.agentId) + '<div class="grow"><div class="name">' + esc(a.name) + '</div><div class="faint">' + ago(p.created) + (p.giver && canSee ? ' · from ' + esc(p.giver) : '') + '</div></div>' +
@@ -363,6 +363,13 @@
       (me.leader && p.status !== 'approved' ? '<a class="btn sm gold" href="#/review/' + p.id + '">Review</a>' : '') +
       (!full ? '<a class="btn sm" href="#/post/' + p.id + '">Details</a>' : '') +
       ((p.agentId === me.id && (p.status === 'pending' || p.status === 'rejected')) || me.leader ? '<button class="btn sm danger" data-del="' + p.id + '">Delete</button>' : '') + '</div>' + cmHtml + '</div>';
+  }
+  function photoKey(id, i) { return i ? id + ':' + i : id; }
+  function photoStrip(p) {   // all covered photos of one record; several = swipe sideways
+    var n = +p.photo || 0, box = function (i) { var k = photoKey(p.id, i); return '<div class="photo-box" data-photo="' + p.id + '" data-idx="' + i + '">' + (S.photos[k] ? '<img alt="Covered photo ' + (i + 1) + '" src="data:image/jpeg;base64,' + S.photos[k] + '">' : 'Tap to load photo ' + (n > 1 ? (i + 1) + ' of ' + n : '')) + '</div>'; };
+    if (n <= 1) return box(0);
+    var out = ''; for (var i = 0; i < n; i++) out += '<div class="strip-item"><div class="strip-n">' + (i + 1) + ' / ' + n + '</div>' + box(i) + '</div>';
+    return '<div class="photo-strip">' + out + '</div><div class="faint" style="margin-top:2px">📷 ' + n + ' photos · swipe sideways</div>';
   }
   function wirePosts(root) {
     root.querySelectorAll('[data-share]').forEach(function (b) { b.onclick = function () { shareWhatsApp(S.data.posts.filter(function (p) { return p.id === b.dataset.share; })[0]); }; });
@@ -381,9 +388,9 @@
     root.querySelectorAll('[data-addselfie]').forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) addSelfieTo(inp.dataset.addselfie, inp.files[0]); }; });
     var lazy = root.querySelectorAll('[data-photo]');
     var load = function (el) {
-      var id = el.dataset.photo, which = el.dataset.which || '', key = id + (which === 'selfie' ? ':s' : '');
+      var id = el.dataset.photo, which = el.dataset.which || '', idx = +el.dataset.idx || 0, key = which === 'selfie' ? id + ':s' : photoKey(id, idx);
       if (S.photos[key] || el.dataset.loading) return; el.dataset.loading = 1; el.textContent = 'Loading photo…';
-      api('photo', {postId: id, which: which}).then(function (r) { S.photos[key] = r.image; el.innerHTML = '<img alt="' + (which ? 'Selfie at the roadshow' : 'Name list, private details covered') + '" src="data:image/jpeg;base64,' + r.image + '">'; })
+      api('photo', {postId: id, which: which, idx: idx}).then(function (r) { S.photos[key] = r.image; el.innerHTML = '<img alt="' + (which ? 'Selfie at the roadshow' : 'Name list, private details covered') + '" src="data:image/jpeg;base64,' + r.image + '">'; })
         .catch(function (e) { el.textContent = errText(e); delete el.dataset.loading; });
     };
     lazy.forEach(function (el) { el.onclick = function () { load(el); }; });
@@ -517,7 +524,7 @@
       (p.source === 'roadshow' ? '<div class="notice info">🎪 <b>Roadshow</b> · 📍 ' + esc(p.location) + (p.selfie ? '<br>Check the selfie shows ' + esc(agent(p.agentId).name.split(' ')[0]) + ' at this place.' : '') + '</div>' + (!p.selfie && !p.purged && !p.photoRemoved ? '<div class="notice warn">🤳 Waiting for ' + esc(agent(p.agentId).name.split(' ')[0]) + '\'s booth selfie. You can approve after it is added (you will get a pop-up). You can still untick names that should not count.</div>' : '') + (p.selfie && !p.purged ? '<div class="photo-box" data-photo="' + p.id + '" data-which="selfie" style="max-width:260px">' + (S.photos[p.id + ':s'] ? '<img alt="" src="data:image/jpeg;base64,' + S.photos[p.id + ':s'] + '">' : 'Loading selfie…') + '</div>' : '') : '') +
       '<div class="notice info">Tick the names that count for bonus. Possible duplicates start unticked, please check them. Photos are deleted ' + (p.photoDays || 30) + ' days after you save, to save space.</div>' +
       rs.map(function (r) { var on = S.decide.d[r.id] === 'approved'; return '<label class="check"><input type="checkbox" data-rv="' + r.id + '"' + (on ? ' checked' : '') + '><div><b>' + esc(r.name) + '</b>' + (r.phone ? ' <span class="faint">' + esc(r.phone) + '</span>' : '') + (r.dup ? '<div class="faint" style="color:var(--warn)">⚠️ ' + esc(r.dup) + '</div>' : '') + '</div></label>'; }).join('') +
-      (p.photo && !p.purged ? '<div class="photo-box" data-photo="' + p.id + '">' + (S.photos[p.id] ? '<img alt="" src="data:image/jpeg;base64,' + S.photos[p.id] + '">' : 'Loading photo…') + '</div>' : '') +
+      (p.photo && !p.purged ? photoStrip(p) : '') +
       '<div class="actions"><button class="btn primary block" id="rv-save">Save decision</button></div>' + (others.length ? '<div class="faint" style="margin-top:8px">' + others.length + ' more page(s) waiting after this one.</div>' : '') + '</div>';
   }
   viewReview.wire = function (root) {
@@ -544,7 +551,7 @@
       '<label class="field"><span>1. 📍 Where is the roadshow?</span><input id="rs-loc" list="rs-places" maxlength="80" placeholder="e.g. Queensbay Mall, Level 1 atrium" value="' + esc(rs.location) + '"></label>' +
       '<datalist id="rs-places">' + places.map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') + '</datalist>' +
       '<div class="field"><span>2. 📋 Photo of the name list</span>' +
-      (ready ? '<label class="btn gold block">📷 Take photo of the list<input type="file" accept="image/*" capture="environment" hidden data-file></label><div style="height:8px"></div><label class="btn block">🖼 Choose from gallery<input type="file" accept="image/*" hidden data-file></label>'
+      (ready ? '<label class="btn gold block">📷 Take photo of the list<input type="file" accept="image/*" capture="environment" hidden data-file></label><div style="height:8px"></div><label class="btn block">🖼 Choose from gallery (you can pick several)<input type="file" accept="image/*" multiple hidden data-file></label>'
         : '<div class="notice warn">Type the place first.</div>') + '</div>' +
       '<div class="field"><span>3. 🤳 Selfie at the booth (proof) · now or later</span>' +
       (rs.selfie ? '<div class="canvas-wrap" style="max-width:240px"><canvas id="rs-selfie"></canvas></div><div class="faint" style="margin-top:4px">' + (rs.faceNote || '') + ' Tap a 🙂 to uncover, drag to cover more.</div><label class="btn sm" style="margin-top:6px">Retake selfie<input type="file" accept="image/*" capture="user" hidden data-selfie></label>'
@@ -615,13 +622,14 @@
     if (!d && S.snapMode === 'roadshow') return roadshowStart();
     if (!d) return modeBar('referral', true) + '<div class="card snap-hero"><div class="big-ico">📒</div><h2>Snap your referral page</h2><p class="muted">Take a photo of the filled referral list. The app reads the names, counts them for you, and covers phone numbers, ages, remarks and faces before your team sees it.</p>' +
       '<label class="btn gold block">📷 Take photo<input type="file" accept="image/*" capture="environment" hidden data-file></label><div style="height:8px"></div>' +
-      '<label class="btn block">🖼 Choose from gallery<input type="file" accept="image/*" hidden data-file></label>' +
-      '<ul class="steps faint" style="text-align:left;margin-top:16px"><li>✔ Lay the page flat, in good light, whole page in the photo.</li><li>✔ The original photo is not saved. Only the covered one is.</li><li>✔ Phone numbers, age and remarks auto-delete after 3 months. Names stay.</li></ul></div>';
+      '<label class="btn block">🖼 Choose from gallery (you can pick several)<input type="file" accept="image/*" multiple hidden data-file></label>' +
+      '<ul class="steps faint" style="text-align:left;margin-top:16px"><li>✔ Lay the page flat, in good light, whole page in the photo.</li><li>✔ Several pages from the same client? Pick them all, or add more on the next screen. They become one record.</li><li>✔ The original photo is not saved. Only the covered one is.</li><li>✔ Phone numbers, age and remarks auto-delete after 3 months. Names stay.</li></ul></div>';
     if (d.stage === 'busy') return modeBar(d.source, false) + '<div class="card snap-hero"><div class="spinner"></div><h2>' + esc(d.msg) + '</h2><ul class="steps muted">' + d.steps.map(function (s) { return '<li>' + s + '</li>'; }).join('') + '</ul></div>';
-    if (d.stage === 'failed') return '<div class="card"><h2>Could not read the photo</h2><div class="notice bad">' + esc(d.error) + '</div><div class="actions"><button class="btn primary" id="sn-retry">Try again</button><button class="btn" id="sn-manual">Type the names myself</button><button class="btn" id="sn-cancel">Cancel</button></div></div>';
+    if (d.stage === 'failed') return '<div class="card"><h2>Could not open the photo</h2><div class="notice bad">' + esc(d.error) + '</div><div class="actions"><button class="btn" id="sn-cancel">Back</button></div></div>';
     var rows = d.rows, n = rows.filter(function (r) { return r.name.trim().length >= 2; }).length, unclear = rows.filter(function (r) { return r.unclear; }).length;
-    var rsd = d.source === 'roadshow';
-    var wrong = rsd && d.kind === 'referral_page' ? 'referral' : !rsd && d.kind === 'roadshow_list' ? 'roadshow' : '';
+    var rsd = d.source === 'roadshow', np = d.pages.length;
+    var kinds = d.pages.map(function (p) { return p.kind; });
+    var wrong = rsd && kinds.indexOf('referral_page') >= 0 && !d.keepType ? 'referral' : !rsd && kinds.indexOf('roadshow_list') >= 0 && !d.keepType ? 'roadshow' : '';
     var html = modeBar(d.source, false) +
       (wrong ? '<div class="notice bad" style="font-size:14.5px">⚠️ <b>This looks like a ' + (wrong === 'roadshow' ? 'ROADSHOW list' : 'REFERRAL booklet page') + '</b>, but you chose ' + (rsd ? 'Roadshow' : 'Referral') + '.' + '<div style="margin-top:8px"><button class="btn sm ' + (wrong === 'roadshow' ? 'gold' : 'primary') + '" data-switch="' + wrong + '">Switch to ' + (wrong === 'roadshow' ? '🎪 Roadshow' : '📒 Referral') + '</button> <button class="btn sm" data-keep>No, keep ' + (rsd ? 'Roadshow' : 'Referral') + '</button></div></div>' : '') +
       '<div class="faint" style="margin:0 2px 8px">Wrong type? <a href="#" data-switch="' + (rsd ? 'referral' : 'roadshow') + '">Change to ' + (rsd ? '📒 Referral page' : '🎪 Roadshow list') + '</a></div>' +
@@ -629,29 +637,33 @@
       (d.selfie ? '<div class="faint">Selfie (proof). Your face stays visible; other people\'s faces are covered 🙂. Tap a cover to remove it, drag to add one.</div>' +
         '<div class="canvas-wrap" style="margin-top:8px;max-width:260px"><canvas id="sn-selfie"></canvas></div>'
         : '<label class="btn sm">🤳 Add booth selfie now<input type="file" accept="image/*" capture="user" hidden data-dselfie></label><div class="faint" style="margin-top:4px">Or add it later from your post. Your leader approves once the selfie is in.</div>') + '</div>' : '') +
-      '<div class="card"><h2>Check before posting</h2><div class="faint">Black boxes and 🙂 are hidden from the team. <b>Drag</b> on the photo to cover more, <b>tap</b> a box to uncover it.</div>' +
-      '<div class="canvas-wrap" style="margin-top:10px"><canvas id="sn-canvas"></canvas></div>' +
-      '<div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><span class="faint">' + d.boxes.filter(function (b) { return !b.off && b.kind !== 'face'; }).length + ' private spots covered · ' + d.boxes.filter(function (b) { return !b.off && b.kind === 'face'; }).length + ' faces covered</span>' +
-      '<button class="btn sm" id="sn-undo">Undo last box</button></div>' +
-      (d.faceErr ? '<div class="notice warn">Face check could not run on this phone (' + esc(d.faceErr) + '). If there are faces, drag over them to cover.</div>' : '') +
-      (d.manual ? '<div class="notice warn">Typed by hand: nothing was covered automatically. Drag over every phone number, age and remark before posting.</div>' : '') +
-      (d.notes ? '<div class="notice info">AI note: ' + esc(d.notes) + '</div>' : '') + '</div>';
+      '<div class="card"><h2>Check before posting · ' + np + ' photo' + (np === 1 ? '' : 's') + '</h2><div class="faint">Black boxes and 🙂 are hidden from the team. <b>Drag</b> on a photo to cover more, <b>tap</b> a box to uncover it.</div>' +
+      d.pages.map(function (p, i) {
+        var priv = p.boxes.filter(function (bx) { return !bx.off && bx.kind !== 'face'; }).length, faces = p.boxes.filter(function (bx) { return !bx.off && bx.kind === 'face'; }).length;
+        return '<div class="page-block">' + (np > 1 ? '<div class="row" style="margin-bottom:6px"><b class="grow">Photo ' + (i + 1) + ' of ' + np + '</b><button class="btn sm danger" data-rmpage="' + i + '">✕ Remove photo</button></div>' : '') +
+          '<div class="canvas-wrap"><canvas data-pcv="' + i + '"></canvas></div>' +
+          '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:6px"><span class="faint">' + priv + ' private spot' + (priv === 1 ? '' : 's') + ' · ' + faces + ' face' + (faces === 1 ? '' : 's') + ' covered</span><button class="btn sm" data-undo-p="' + i + '">Undo last box</button></div>' +
+          (p.error ? '<div class="notice bad">Could not read this photo: ' + esc(p.error) + '. Type its names below and drag over every phone number, age and remark. <button class="btn sm" data-reread="' + i + '">Try reading again</button></div>' : '') +
+          (p.faceErr ? '<div class="notice warn">Face check could not run on this phone. If there are faces, drag over them to cover.</div>' : '') +
+          (p.notes ? '<div class="notice info">AI note: ' + esc(p.notes) + '</div>' : '') + '</div>';
+      }).join('') +
+      (np < 6 ? '<div class="actions" style="margin-top:10px"><label class="btn sm gold">📷 + Add another photo<input type="file" accept="image/*" capture="environment" hidden data-more></label><label class="btn sm">🖼 + From gallery<input type="file" accept="image/*" multiple hidden data-more></label></div><div class="faint" style="margin-top:4px">Another page of the same list? Add it here (up to 6 photos). All names go into this one record.</div>' : '<div class="faint" style="margin-top:8px">Maximum 6 photos per record.</div>') + '</div>';
     html += '<div class="card"><div class="row"><h2 class="grow">' + (rsd ? 'Names found: ' : 'Referrals found: ') + n + '</h2></div>' +
       (unclear ? '<div class="notice warn">' + unclear + ' name' + (unclear === 1 ? ' was' : 's were') + ' hard to read (yellow). Please fix the spelling.</div>' : '') +
-      (!rows.length ? '<div class="notice warn">No names were found. Retake the photo, or add the names below.</div>' : '') +
+      (!rows.length ? '<div class="notice warn">No names were found. Add more photos, or type the names below.</div>' : '') +
       (rsd ? '' : '<label class="field"><span>Referral given by (your client)</span><input id="sn-giver" value="' + esc(d.giver) + '" placeholder="Name at &quot;Your Name&quot;"></label>') +
       rows.map(function (r, i) {
         var priv = [r.age && 'Age ' + r.age, r.phone && r.phone, r.gender, r.remarks].filter(Boolean).join(' · ');
-        return '<div class="ref-edit' + (r.unclear ? ' unclear' : '') + '"><div class="no">' + (i + 1) + '</div><div><input data-rn="' + i + '" value="' + esc(r.name) + '" placeholder="Name">' + (priv ? '<div class="priv">🔒 ' + esc(priv) + '</div>' : '') + '</div><button class="btn sm" data-rx="' + i + '" aria-label="Remove">✕</button></div>';
+        return '<div class="ref-edit' + (r.unclear ? ' unclear' : '') + '"><div class="no">' + (i + 1) + '</div><div><input data-rn="' + i + '" value="' + esc(r.name) + '" placeholder="Name">' + (priv || np > 1 ? '<div class="priv">' + (np > 1 ? '📷 ' + ((r.page || 0) + 1) + (priv ? ' · ' : '') : '') + (priv ? '🔒 ' + esc(priv) : '') + '</div>' : '') + '</div><button class="btn sm" data-rx="' + i + '" aria-label="Remove">✕</button></div>';
       }).join('') +
       '<div class="actions"><button class="btn sm" id="sn-add">+ Add a name</button></div><div class="faint" style="margin-top:6px">🔒 = only you and your leader see it, and it auto-deletes in 3 months.</div></div>';
-    html += '<div class="card"><label class="check"><input type="checkbox" id="sn-ok"' + (d.ok ? ' checked' : '') + '><span>I checked the photo: no phone number, IC, age, remark, my client\'s own name or face can be seen.</span></label>' +
+    html += '<div class="card"><label class="check"><input type="checkbox" id="sn-ok"' + (d.ok ? ' checked' : '') + '><span>I checked ' + (np > 1 ? 'all ' + np + ' photos' : 'the photo') + ': no phone number, IC, age, remark, my client\'s own name or face can be seen.</span></label>' +
       '<button class="btn gold block" id="sn-post"' + (n && d.ok ? '' : ' disabled') + '>Post ' + n + (rsd ? ' roadshow name' : ' referral') + (n === 1 ? '' : 's') + ' to the team</button>' +
-      '<div class="actions"><button class="btn sm" id="sn-cancel">Cancel</button><label class="btn sm">Retake<input type="file" accept="image/*" capture="environment" hidden data-file></label></div></div>';
+      '<div class="actions"><button class="btn sm" id="sn-cancel">Cancel</button></div></div>';
     return html;
   }
   viewSnap.wire = function (root) {
-    root.querySelectorAll('[data-file]').forEach(function (inp) { inp.onchange = function () { if (inp.files[0]) startSnap(inp.files[0]); }; });
+    root.querySelectorAll('[data-file]').forEach(function (inp) { inp.onchange = function () { if (inp.files.length) startSnap([].slice.call(inp.files)); }; });
     root.querySelectorAll('[data-mode]').forEach(function (b) { b.onclick = function (e) { e.preventDefault(); S.snapMode = b.dataset.mode || null; render(); }; });
     wireRoadshowStart(root);
     var ap = root.querySelector('#sn-approach');
@@ -663,25 +675,36 @@
     var d = S.draft; if (!d) return;
     var q = function (s) { return root.querySelector(s); };
     if (q('#sn-cancel')) q('#sn-cancel').onclick = function () { S.draft = null; S.snapMode = null; S.rs = null; render(); };
-    if (q('#sn-retry')) q('#sn-retry').onclick = function () { readPhoto(); };
-    if (q('#sn-manual')) q('#sn-manual').onclick = function () { d.stage = 'review'; d.manual = true; d.rows = [{name: ''}]; render(); };
     if (d.stage !== 'review') return;
-    var cv = q('#sn-canvas'); REDACT.render(d.canvas, d.boxes, cv); wireDraw(cv, d);
-    q('#sn-undo').onclick = function () { for (var i = d.boxes.length - 1; i >= 0; i--) if (!d.boxes[i].off) { d.boxes[i].off = true; break; } render(); };
-    root.querySelectorAll('[data-switch]').forEach(function (b) { b.onclick = function (e) { e.preventDefault(); var to = b.dataset.switch; d.source = to; S.snapMode = to; d.kind = ''; if (to === 'referral') d.giver = d.aiGiver || ''; else { d.giver = ''; d.location = d.location || (S.rs && S.rs.location) || ''; } d.ok = false; render(); toast(to === 'roadshow' ? 'Changed to 🎪 Roadshow' : 'Changed to 📒 Referral', to === 'roadshow' ? 'Type the roadshow place. The selfie can come later.' : 'Check the client name at "Your Name".'); }; });
-    if (q('[data-keep]')) q('[data-keep]').onclick = function () { d.kind = ''; render(); };
+    root.querySelectorAll('[data-pcv]').forEach(function (cv) { var p = d.pages[+cv.dataset.pcv]; REDACT.render(p.canvas, p.boxes, cv); wireDraw(cv, p); });
+    root.querySelectorAll('[data-undo-p]').forEach(function (b) { b.onclick = function () { var bx = d.pages[+b.dataset.undoP].boxes; for (var i = bx.length - 1; i >= 0; i--) if (!bx[i].off) { bx[i].off = true; break; } d.ok = false; render(); }; });
+    root.querySelectorAll('[data-rmpage]').forEach(function (b) {
+      b.onclick = function () {
+        var i = +b.dataset.rmpage, cnt = d.rows.filter(function (r) { return (r.page || 0) === i; }).length;
+        confirmBox('Remove photo ' + (i + 1) + '?', 'The photo and the ' + cnt + ' name' + (cnt === 1 ? '' : 's') + ' read from it will be removed from this record.', 'Remove', true).then(function (y) {
+          if (!y) return;
+          d.pages.splice(i, 1);
+          d.rows = d.rows.filter(function (r) { return (r.page || 0) !== i; }).map(function (r) { if ((r.page || 0) > i) r.page--; return r; });
+          render();
+        });
+      };
+    });
+    root.querySelectorAll('[data-more]').forEach(function (inp) { inp.onchange = function () { if (inp.files.length) addPages([].slice.call(inp.files)); }; });
+    root.querySelectorAll('[data-reread]').forEach(function (b) { b.onclick = function () { rereadPage(+b.dataset.reread); }; });
+    root.querySelectorAll('[data-switch]').forEach(function (b) { b.onclick = function (e) { e.preventDefault(); var to = b.dataset.switch; d.source = to; S.snapMode = to; d.keepType = true; if (to === 'referral') d.giver = d.aiGiver || ''; else { d.giver = ''; d.location = d.location || (S.rs && S.rs.location) || ''; } d.ok = false; render(); toast(to === 'roadshow' ? 'Changed to 🎪 Roadshow' : 'Changed to 📒 Referral', to === 'roadshow' ? 'Type the roadshow place. The selfie can come later.' : 'Check the client name at "Your Name".'); }; });
+    if (q('[data-keep]')) q('[data-keep]').onclick = function () { d.keepType = true; render(); };
     if (q('#sn-giver')) q('#sn-giver').oninput = function (e) { d.giver = e.target.value; };
     if (q('#sn-loc')) q('#sn-loc').oninput = function (e) { d.location = e.target.value; };
     root.querySelectorAll('[data-dselfie]').forEach(function (inp) { inp.onchange = function () { if (!inp.files[0]) return; toast('Checking selfie…', ''); processSelfie(inp.files[0]).then(function (sf) { d.selfie = sf; render(); }, function (e) { toast('Selfie not opened', e.message); }); }; });
     if (q('#sn-selfie') && d.selfie) { var sc = q('#sn-selfie'); REDACT.render(d.selfie.canvas, d.selfie.boxes, sc); wireDraw(sc, d.selfie); }
     root.querySelectorAll('[data-rn]').forEach(function (inp) { inp.oninput = function () { var r = d.rows[+inp.dataset.rn]; r.name = inp.value; r.unclear = /\?/.test(inp.value); updatePostBtn(); }; inp.onchange = function () { render(); }; });
     root.querySelectorAll('[data-rx]').forEach(function (b) { b.onclick = function () { d.rows.splice(+b.dataset.rx, 1); render(); }; });
-    q('#sn-add').onclick = function () { d.rows.push({name: ''}); render(); var ins = root.ownerDocument.querySelectorAll('[data-rn]'); if (ins.length) ins[ins.length - 1].focus(); };
+    q('#sn-add').onclick = function () { d.rows.push({name: '', page: Math.max(0, d.pages.length - 1)}); render(); var ins = root.ownerDocument.querySelectorAll('[data-rn]'); if (ins.length) ins[ins.length - 1].focus(); };
     q('#sn-ok').onchange = function (e) { d.ok = e.target.checked; updatePostBtn(); };
     q('#sn-post').onclick = postDraft;
     function updatePostBtn() { var n = d.rows.filter(function (r) { return r.name.trim().length >= 2; }).length, b = document.getElementById('sn-post'); b.disabled = !(n && d.ok); b.textContent = 'Post ' + n + (d.source === 'roadshow' ? ' roadshow name' : ' referral') + (n === 1 ? '' : 's') + ' to the team'; }
   };
-  function wireDraw(cv, d) {
+  function wireDraw(cv, d) {   // d = something with {canvas, boxes}: one photo of the draft, or a selfie
     var start = null, box = null;
     var pt = function (e) { var r = cv.getBoundingClientRect(); return {x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height}; };
     cv.addEventListener('pointerdown', function (e) { cv.setPointerCapture(e.pointerId); start = pt(e); box = null; });
@@ -694,31 +717,66 @@
     });
     cv.addEventListener('pointerup', function (e) {
       if (!start) return; var p = pt(e);
-      if (!box) { var i = REDACT.hit(d.boxes, p.x, p.y); if (i >= 0) { d.boxes[i].off = true; d.ok = false; } }
+      if (!box) { var i = REDACT.hit(d.boxes, p.x, p.y); if (i >= 0) { d.boxes[i].off = true; if (S.draft) S.draft.ok = false; } }
       start = null; box = null; if (!cv.closest('.modal')) render();
     });
   }
-  function startSnap(file) {
-    S.draft = {stage: 'busy', msg: 'Opening photo…', steps: [], boxes: [], rows: [], giver: '', ok: false, source: S.snapMode === 'roadshow' ? 'roadshow' : 'referral'};
+  /* one or more photos -> one record. Each photo is read by AI and covered on its own; names are merged. */
+  function startSnap(files) {
+    S.draft = {stage: 'busy', msg: 'Opening photo…', steps: [], pages: [], rows: [], giver: '', aiGiver: '', ok: false, source: S.snapMode === 'roadshow' ? 'roadshow' : 'referral'};
     if (S.draft.source === 'roadshow' && S.rs) { S.draft.location = S.rs.location; S.draft.selfie = S.rs.selfie; }
-    location.hash = '#/snap'; render();
-    REDACT.loadImage(file).then(function (img) {
-      S.draft.canvas = REDACT.toCanvas(img, 1600);
-      readPhoto();
-    }).catch(function (e) { S.draft.stage = 'failed'; S.draft.error = e.message; render(); });
+    location.hash = '#/snap';
+    addPages(files);
   }
-  function readPhoto() {
-    var d = S.draft; d.stage = 'busy'; d.msg = d.source === 'roadshow' ? 'Reading your roadshow name list…' : 'Reading your referral page…'; d.steps = ['⏳ Finding names and counting referrals', '⏳ Finding phone numbers, ages, remarks', '⏳ Looking for faces']; render();
-    var face = REDACT.faces(d.canvas).then(function (f) { d.steps[2] = '✔ Faces checked (' + f.length + ' found)'; render(); return f; })
-      .catch(function (e) { d.faceErr = (e && e.message || 'not supported').slice(0, 60); d.steps[2] = '⚠ Face check not available'; render(); return []; });
-    var ai = api('read', {image: REDACT.b64(d.canvas, 0.85)}).then(function (r) { d.steps[0] = '✔ ' + r.read.rows.length + ' names found'; d.steps[1] = '✔ ' + r.read.private.length + ' private spots found'; render(); return r.read; });
-    Promise.all([ai, face]).then(function (res) {
+  function addPages(files) {
+    var d = S.draft, room = 6 - d.pages.length;
+    if (files.length > room) toast('Only ' + room + ' more photo' + (room === 1 ? '' : 's') + ' fit', 'Maximum 6 photos per record. Extra photos were skipped.');
+    files = files.slice(0, Math.max(0, room)); if (!files.length) return;
+    var total = files.length, done = 0, base = d.pages.length;
+    d.stage = 'busy'; d.ok = false;
+    var step = function () {
+      d.msg = (total > 1 ? 'Reading photo ' + (done + 1) + ' of ' + total + '…' : (d.source === 'roadshow' ? 'Reading your roadshow name list…' : 'Reading your referral page…'));
+      d.steps = ['⏳ Finding names and counting them', '⏳ Finding phone numbers, ages, remarks', '⏳ Looking for faces']; render();
+    };
+    var chain = Promise.resolve();
+    files.forEach(function (file) {
+      chain = chain.then(function () {
+        step();
+        return REDACT.loadImage(file).then(function (img) {
+          var page = {canvas: REDACT.toCanvas(img, 1600), boxes: []};
+          d.pages.push(page);
+          return readPage(page, d.pages.length - 1);
+        }, function (e) { toast('Photo skipped', e.message); }).then(function () { done++; });
+      });
+    });
+    chain.then(function () {
+      if (!d.pages.length) { d.stage = 'failed'; d.error = 'None of the photos could be opened. Please use JPG or PNG photos.'; }
+      else d.stage = 'review';
+      if (S.draft === d) render();
+    });
+  }
+  function readPage(page, idx) {
+    var d = S.draft;
+    var face = REDACT.faces(page.canvas).then(function (f) { d.steps[2] = '✔ Faces checked (' + f.length + ' found)'; render(); return f; })
+      .catch(function (e) { page.faceErr = (e && e.message || 'not supported').slice(0, 60); d.steps[2] = '⚠ Face check not available'; render(); return []; });
+    var ai = api('read', {image: REDACT.b64(page.canvas, 0.85)}).then(function (r) { d.steps[0] = '✔ ' + r.read.rows.length + ' names found'; d.steps[1] = '✔ ' + r.read.private.length + ' private spots found'; render(); return r.read; });
+    return Promise.all([ai, face]).then(function (res) {
       var r = res[0];
-      d.kind = r.kind; d.aiGiver = r.giver; d.rows = r.rows; d.giver = d.source === 'roadshow' ? '' : r.giver; d.notes = r.notes; d.manual = false;
-      d.boxes = r.private.map(function (b) { return {kind: 'private', type: b.type, x: b.x, y: b.y, w: b.w, h: b.h}; })
+      page.kind = r.kind; page.notes = r.notes; page.error = '';
+      if (!d.aiGiver && r.giver) { d.aiGiver = r.giver; if (d.source !== 'roadshow' && !d.giver) d.giver = r.giver; }
+      r.rows.forEach(function (row) { row.page = idx; d.rows.push(row); });
+      page.boxes = page.boxes.filter(function (bx) { return bx.kind === 'manual'; }).concat(r.private.map(function (b) { return {kind: 'private', type: b.type, x: b.x, y: b.y, w: b.w, h: b.h}; }))
         .concat(res[1]).concat(r.faces.map(function (b) { return {kind: 'face', x: b.x, y: b.y, w: b.w, h: b.h}; }));
-      d.stage = 'review'; render();
-    }).catch(function (e) { d.stage = 'failed'; d.error = errText(e); render(); });
+    }, function (e) {   // this photo could not be read: keep it, the agent types its names and covers by hand
+      page.error = errText(e);
+      return face.then(function (f) { page.boxes = page.boxes.concat(f); });
+    });
+  }
+  function rereadPage(i) {
+    var d = S.draft, page = d.pages[i];
+    d.rows = d.rows.filter(function (r) { return (r.page || 0) !== i; });
+    d.stage = 'busy'; d.msg = 'Reading photo ' + (i + 1) + ' again…'; d.steps = ['⏳ Finding names', '⏳ Finding private details', '⏳ Looking for faces']; render();
+    readPage(page, i).then(function () { d.stage = 'review'; render(); });
   }
   /* Posting feels instant: celebrate right away, upload in the background (a few seconds to Google).
      A card on the Feed shows "Posting…"; if the upload fails it turns red with Retry, so nothing is lost. */
@@ -726,10 +784,10 @@
     var d = S.draft, rows = d.rows.filter(function (r) { return r.name.trim().length >= 2; });
     var rsd = d.source === 'roadshow';
     if (rsd && (!d.location || d.location.trim().length < 3)) return toast('Location needed', 'Type where the roadshow was.');
-    confirmBox('Post ' + rows.length + (rsd ? ' roadshow name' : ' referral') + (rows.length === 1 ? '' : 's') + '?', (rsd && !d.selfie ? '<b>No selfie yet:</b> add it later from your post so your leader can approve.<br>' : '') + 'Your team will see your name, ' + (rsd ? 'the roadshow place, ' + (d.selfie ? 'your selfie, ' : '') : '') + 'the names and the covered photo. Phone numbers, ages and remarks stay private and auto-delete in 3 months.', 'Post it').then(function (y) {
+    confirmBox('Post ' + rows.length + (rsd ? ' roadshow name' : ' referral') + (rows.length === 1 ? '' : 's') + '?', (rsd && !d.selfie ? '<b>No selfie yet:</b> add it later from your post so your leader can approve.<br>' : '') + 'Your team will see your name, ' + (rsd ? 'the roadshow place, ' + (d.selfie ? 'your selfie, ' : '') : '') + 'the names and the covered photo' + (d.pages.length > 1 ? 's (' + d.pages.length + ')' : '') + '. Phone numbers, ages and remarks stay private and auto-delete in 3 months.', 'Post it').then(function (y) {
       if (!y) return;
-      var small = REDACT.toCanvas(REDACT.render(d.canvas, d.boxes), 1280);
-      var payload = Object.assign({giver: d.giver, rows: rows, photo: REDACT.b64(small, 0.8), covered: true}, rsd ? {source: 'roadshow', location: d.location.trim(), selfie: d.selfie ? selfieB64(d.selfie) : ''} : {});
+      var photos = d.pages.map(function (p) { return REDACT.b64(REDACT.toCanvas(REDACT.render(p.canvas, p.boxes), 1280), 0.8); });
+      var payload = Object.assign({giver: d.giver, rows: rows.map(function (r) { return {name: r.name, age: r.age, phone: r.phone, gender: r.gender, remarks: r.remarks}; }), photo: photos[0], photos: photos, covered: true}, rsd ? {source: 'roadshow', location: d.location.trim(), selfie: d.selfie ? selfieB64(d.selfie) : ''} : {});
       if (rsd) { var pl = LS.get('rsPlaces', []).filter(function (x) { return x !== payload.location; }); pl.unshift(payload.location); LS.set('rsPlaces', pl.slice(0, 8)); }
       S.draft = null; S.snapMode = null; S.rs = null;
       var job = {payload: payload, n: rows.length, source: rsd ? 'roadshow' : 'referral', location: payload.location || '', state: 'sending'};

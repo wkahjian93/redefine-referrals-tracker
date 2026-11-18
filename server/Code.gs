@@ -189,10 +189,16 @@ var CORE = (function () {
     return d;
   }
 
+  /* a post can hold several photos (pages of the same referral record): photoId keeps them comma-separated */
+  var MAX_PHOTOS = 6;
+  function photoIdsOf(p) { return String(p && p.photoId || '').split(',').filter(Boolean); }
+  function trashPhotos(store, p) { var n = 0; photoIdsOf(p).forEach(function (id) { try { store.trashPhoto(id); } catch (e) {} n++; }); return n; }
+
   /* ---------- posting a referral page ---------- */
   function post(q, store, me) {
     var source = q.source === 'roadshow' ? 'roadshow' : 'referral', location = str(q.location, 80);
-    if (!b64ok(q.photo, MAX_PHOTO_B64)) fail('bad_photo');
+    var photos = (Array.isArray(q.photos) && q.photos.length ? q.photos : [q.photo]).slice(0, MAX_PHOTOS);
+    if (!photos.every(function (b) { return b64ok(b, MAX_PHOTO_B64); })) fail('bad_photo');
     if (source === 'roadshow') {   // roadshow names need the place and a selfie there as proof
       if (location.length < 3) fail('location_needed');
       if (q.selfie && !b64ok(q.selfie, MAX_PHOTO_B64)) fail('bad_photo');   // the booth selfie can also be added later (addSelfie)
@@ -205,7 +211,7 @@ var CORE = (function () {
     var now = nowIso(store), posts = store.load('posts'), refs = store.load('refs');
     var mk = monthKey(now), before = monthCounts(refs, mk), firstEver = !refs.some(function (r) { return r.agentId === me.id; });
     var p = {id: newId(store, 10), agentId: me.id, kind: 'referral', giver: source === 'roadshow' ? '' : str(q.giver, 60), text: str(q.text, 300),
-      photoId: store.putPhoto((source === 'roadshow' ? 'roadshow_' : 'ref_') + now.slice(0, 10) + '_' + me.id + '.jpg', q.photo), count: rows.length, status: 'pending', created: now, purged: '',
+      photoId: photos.map(function (b, i) { return store.putPhoto((source === 'roadshow' ? 'roadshow_' : 'ref_') + now.slice(0, 10) + '_' + me.id + (photos.length > 1 ? '_' + (i + 1) : '') + '.jpg', b); }).join(','), count: rows.length, status: 'pending', created: now, purged: '',
       source: source, location: source === 'roadshow' ? location : '', selfieId: source === 'roadshow' && q.selfie ? store.putPhoto('selfie_' + now.slice(0, 10) + '_' + me.id + '.jpg', q.selfie) : ''};
     var live = refs.filter(function (r) { return !r.purged; });
     var added = rows.map(function (r) {
@@ -259,7 +265,7 @@ var CORE = (function () {
       me: {id: me.id, name: me.name, leader: leader, devices: store.load('devices').filter(function (d) { return d.agentId === me.id; }).length},
       callDays: CALL_DAYS, callRemindDays: CALL_REMIND_DAYS,
       agents: store.load('agents').filter(function (a) { return String(a.active) !== 'false'; }).map(function (a) { return {id: a.id, name: a.name, role: a.role}; }),
-      posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, source: p.source || 'referral', location: p.location || '', selfie: p.selfieId && !p.purged ? 1 : 0, photo: p.photoId && !p.purged ? 1 : 0, photoRemoved: p.photoRemoved || '', reviewedAt: p.reviewedAt || '', photoDays: PHOTO_DAYS, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
+      posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, source: p.source || 'referral', location: p.location || '', selfie: p.selfieId && !p.purged ? 1 : 0, photo: p.purged ? 0 : photoIdsOf(p).length, photoRemoved: p.photoRemoved || '', reviewedAt: p.reviewedAt || '', photoDays: PHOTO_DAYS, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
       refs: store.load('refs').map(function (r) { return publicRef(r, leader || r.agentId === me.id); }),
       comments: store.load('comments').filter(recent),
       rates: rates(store),
@@ -269,7 +275,7 @@ var CORE = (function () {
 
   function photo(q, store) {
     var p = store.load('posts').filter(function (x) { return x.id === q.postId; })[0];
-    var id = q.which === 'selfie' ? p && p.selfieId : p && p.photoId;
+    var id = q.which === 'selfie' ? p && p.selfieId : photoIdsOf(p)[Math.max(0, Math.min(MAX_PHOTOS - 1, +q.idx || 0))];
     if (!p || !id || p.purged) fail('photo_gone');
     return {image: store.getPhoto(id)};
   }
@@ -327,7 +333,7 @@ var CORE = (function () {
     if (!p) fail('not_found');
     if (p.agentId !== me.id && !leader) fail('not_yours');
     if ((p.status === 'approved' || p.status === 'partial') && !leader) fail('approved_ask_leader');   // bonus already counted
-    if (p.photoId && !p.purged) { try { store.trashPhoto(p.photoId); } catch (e) {} }
+    if (!p.purged) trashPhotos(store, p);
     if (p.selfieId && !p.purged) { try { store.trashPhoto(p.selfieId); } catch (e) {} }
     store.save('posts', posts.filter(function (x) { return x.id !== p.id; }));
     store.save('refs', store.load('refs').filter(function (r) { return r.postId !== p.id; }));
@@ -621,12 +627,12 @@ var CORE = (function () {
       if (p.kind !== 'referral' || p.purged) return;
       if (p.status !== 'pending' && !p.reviewedAt) { p.reviewedAt = now; changed = true; }   // reviewed before this rule existed: start the clock today
       if (p.reviewedAt && !p.photoRemoved && (p.photoId || p.selfieId) && daysAgo(store, p.reviewedAt) >= PHOTO_DAYS) {   // 30 days after approval: photos go, names and details stay
-        if (p.photoId) { try { store.trashPhoto(p.photoId); } catch (e) {} ph++; }
+        ph += trashPhotos(store, p);
         if (p.selfieId) { try { store.trashPhoto(p.selfieId); } catch (e) {} ph++; }
         p.photoId = ''; p.selfieId = ''; p.photoRemoved = now; changed = true;
       }
       if (daysAgo(store, p.created) >= KEEP_DAYS) {
-        if (p.photoId) { try { store.trashPhoto(p.photoId); } catch (e) {} ph++; }
+        ph += trashPhotos(store, p);
         if (p.selfieId) { try { store.trashPhoto(p.selfieId); } catch (e) {} }
         p.photoId = ''; p.selfieId = ''; p.giver = ''; p.purged = now;
       }

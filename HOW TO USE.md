@@ -23,6 +23,8 @@
 2. Snap the **name list**. Everything after that is the same as a referral page: names counted, private details covered, leader approves, RM1 per name once you call within 14 days, ☕ appointment RM5, 🎯 close RM20.
 3. **🤳 Selfie at the booth** as proof: take it now, or later from your post ("Add booth selfie"). Your face stays visible; other people's faces are covered 🙂. Your leader can approve only after the selfie is in, and gets a pop-up when you add it.
 
+**Several pages for one client (or both sides of a roadshow sheet)?** Pick them all from the gallery at once, or tap **📷 + Add another photo** on the check screen (up to 6). Each photo is read and covered, all names go into **one record**, and the team sees the photos side by side (swipe). Remove a wrong photo with **✕ Remove photo**.
+
 **Asked but got no names?** Snap → **🙋 I asked a client but got no names**. It counts as an *Approach* (effort, not paid).
 
 **After the referral (this is where the bigger bonus is):** the **📋 Leads** tab (bottom bar).
