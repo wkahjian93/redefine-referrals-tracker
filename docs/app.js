@@ -20,7 +20,7 @@
     no_names: 'There are no names to post.', location_needed: 'Please type the roadshow location.', selfie_needed: 'Please take a selfie at the roadshow as proof.', selfie_missing: 'Waiting for the booth selfie. Approve after the agent adds it.', no_owner_email: 'No owner email is set on the server yet.', privacy_not_confirmed: 'Please tick the privacy check first.', photo_gone: 'This photo was auto-deleted (older than 3 months).',
     leader_only: 'Only the leader can do this.', not_yours: 'You can only change your own posts.', approved_ask_leader: 'This page is already approved. Ask your leader to remove it.',
     not_found: 'This item no longer exists.', appointment_first: 'Mark the appointment first, then the close.', already_marked: 'Already marked.',
-    lead_not_counted: 'This lead was not counted, so it has no steps.', undo_close_first: 'Undo the close first.', undo_appt_first: 'Undo the appointment first.', bad_rate: 'Rates must be numbers (RM).', network: 'No connection. Check your internet and try again.', server_error: 'Server problem. Please try again.'
+    lead_not_counted: 'This lead was not counted, so it has no steps.', undo_close_first: 'Undo the close first.', undo_appt_first: 'Undo the appointment first.', bad_rate: 'Rates must be numbers (RM).', bad_time: 'Pick a date and time.', bad_link: 'That link code is not valid any more. Make a new one.', network: 'No connection. Check your internet and try again.', server_error: 'Server problem. Please try again.'
   };
   function errText(e) { return ERR[e && e.message] || (e && e.message) || 'Something went wrong.'; }
 
@@ -889,12 +889,47 @@
       : '<button class="btn sm gold" data-step="call" data-ref="' + r.id + '">📞 Called</button>' + (r.phone ? ' <a class="btn sm" href="tel:' + esc(r.phone.replace(/[^\d+]/g, '')) + '">Call now</a>' : '');
     return '<div class="ref-edit" style="grid-template-columns:1fr"><div><b>' + esc(r.name) + '</b> <span class="faint">' + (r.source === 'roadshow' ? '🎪 roadshow · ' : '') + (r.status === 'pending' ? 'lead waiting approval · ' : '') + ago(r.created) + '</span>' +
       '<div style="margin-top:5px">' + callChip(r) + '</div>' +
-      '<div class="actions" style="margin-top:6px">' + callBtn + btn('appt', '☕ Appointment done') + btn('close', '🎯 Closed case') + '</div></div></div>';
+      '<div class="actions" style="margin-top:6px">' + callBtn + planBtns(r, mine) + btn('appt', '☕ Appointment done') + btn('close', '🎯 Closed case') + '</div></div></div>';
+  }
+  /* 📅 Set appointment (optional) or 🚫 No appointment, between Called and Appointment done */
+  var ONFIELD_URL = 'https://wkahjian93.github.io/policy-summary-power-tools/', CALENDAR_URL = 'https://wkahjian93.github.io/redefine-calendar/';
+  function whenLabel(iso) { var d = myt(iso); return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ', ' + d.toISOString().slice(11, 16); }
+  function planBtns(r, mine) {
+    var met = r.appt === 'pending' || r.appt === 'approved';
+    if (r.planAt) return '<span class="chip">📅 ' + whenLabel(r.planAt) + (mine && !met ? ' <a href="#" data-plan="' + r.id + '" class="faint">change</a> <a href="#" data-undo="plan" data-ref="' + r.id + '" class="faint">undo</a>' : '') + '</span>' +
+      (mine ? '<a class="btn sm" href="' + ONFIELD_URL + '#/prospecting?name=' + encodeURIComponent(r.name) + '" target="_blank" rel="noopener">📒 On Field</a>' : '');
+    if (r.noAppt) return '<span class="chip">🚫 No appointment' + (mine ? ' <a href="#" data-undo="noappt" data-ref="' + r.id + '" class="faint">undo</a>' : '') + '</span>';
+    if (!mine || met) return '';
+    return '<button class="btn sm" data-plan="' + r.id + '">📅 Set appointment</button><button class="btn sm" data-step="noappt" data-ref="' + r.id + '">🚫 No appointment</button>';
+  }
+  function setAppointment(r) {
+    var d = r.planAt ? myt(r.planAt) : myt(new Date(Date.now() + 864e5).toISOString()), day = d.toISOString().slice(0, 10), tm = r.planAt ? d.toISOString().slice(11, 16) : '15:00';
+    modal('<h2>📅 Appointment with ' + esc(r.name) + '</h2><div class="faint">Optional: only if they agreed to meet. Saved here and in your connected REDEFINE Calendar and On Field.</div>' +
+      '<div class="tiles" style="margin:12px 0"><label class="field" style="margin:0"><span>Date</span><input type="date" id="ap-d" value="' + day + '"></label><label class="field" style="margin:0"><span>Time</span><input type="time" id="ap-t" value="' + tm + '"></label></div>' +
+      '<div class="btns"><button class="btn" data-n>Cancel</button><button class="btn gold" data-y>Save appointment</button></div>', function (m, close) {
+      m.querySelector('[data-n]').onclick = close;
+      m.querySelector('[data-y]').onclick = function () {
+        var dd = m.querySelector('#ap-d').value, tt = m.querySelector('#ap-t').value; if (!dd || !tt) return toast('Pick a date and time', '');
+        var b = this; b.disabled = true;
+        api('step', {refId: r.id, step: 'plan', when: dd + 'T' + tt}).then(function () {
+          close(); if (S.sounds) SOUND.ding();
+          var lk = (S.data && S.data.links) || {};
+          toast('Appointment saved 📅', (lk.calendar ? 'Added to your REDEFINE Calendar. ' : '') + (lk.onfield ? 'On Field logs it next time you open it.' : 'Tip: connect Calendar and On Field in Me.'));
+          return refresh(true);
+        }).catch(function (e) { b.disabled = false; toast('Not saved', errText(e)); });
+      };
+    });
   }
   function wireLeadRows(root) {
+    root.querySelectorAll('[data-plan]').forEach(function (b) { b.onclick = function (e) { e.preventDefault(); setAppointment(S.data.refs.filter(function (x) { return x.id === b.dataset.plan; })[0]); }; });
     root.querySelectorAll('[data-step]').forEach(function (b) {
       b.onclick = function () {
         var r = S.data.refs.filter(function (x) { return x.id === b.dataset.ref; })[0], k = b.dataset.step;
+        if (k === 'noappt') {
+          return confirmBox('No appointment with ' + r.name + '?', 'You called but they did not agree to meet. It still counts as <b>called</b> (your lead bonus is kept). The lead moves to Done.', 'Yes').then(function (y) {
+            if (y) api('step', {refId: r.id, step: 'noappt'}).then(function () { toast('Saved', 'Counted as called. Next lead! 💪'); return refresh(true); }).catch(function (e) { toast('Not saved', errText(e)); });
+          });
+        }
         if (k === 'call') {
           var c = callInfo(r);
           return confirmBox('Called ' + r.name + '?', c.state === 'forfeit' ? 'It is past ' + ((S.data && S.data.callDays) || 14) + ' days, so the lead bonus is already forfeited, but calling still counts for your follow-up.' : 'Marking the call keeps your RM' + S.data.rates.lead + ' lead bonus for this name.', 'Yes, I called').then(function (y) {
@@ -914,7 +949,7 @@
     root.querySelectorAll('[data-undo]').forEach(function (a) {
       a.onclick = function (e) {
         e.preventDefault();
-        var label = {appt: 'appointment', close: 'closed case', call: 'call'}[a.dataset.undo];
+        var label = {appt: 'appointment', close: 'closed case', call: 'call', plan: 'appointment date', noappt: 'no appointment'}[a.dataset.undo];
         confirmBox('Undo this?', 'Remove the ' + label + ' mark?', 'Undo', true).then(function (y) {
           if (y) api('step', {refId: a.dataset.ref, step: a.dataset.undo, done: false}).then(function () { return refresh(true); }).catch(function (er) { toast('Not changed', errText(er)); });
         });
@@ -933,16 +968,16 @@
   function viewLeads() {
     var me = S.data.me.id, all = S.data.refs.filter(function (r) { return r.agentId === me; }).sort(function (a, b) { return a.created < b.created ? 1 : -1; });
     var toCall = myToCall();
-    var needAppt = all.filter(function (r) { return r.status !== 'rejected' && toCall.indexOf(r) < 0 && (!r.appt || r.appt === 'rejected'); });
+    var needAppt = all.filter(function (r) { return r.status !== 'rejected' && toCall.indexOf(r) < 0 && !r.noAppt && (!r.appt || r.appt === 'rejected'); });
     var needClose = all.filter(function (r) { return r.status !== 'rejected' && (r.appt === 'pending' || r.appt === 'approved') && (!r.close || r.close === 'rejected'); });
-    var done = all.filter(function (r) { return r.close === 'pending' || r.close === 'approved' || r.status === 'rejected'; });
+    var done = all.filter(function (r) { return r.close === 'pending' || r.close === 'approved' || r.status === 'rejected' || (r.noAppt && !r.appt); });
     var sec = function (t, sub, list, hot) { return list.length ? '<div class="card"' + (hot ? ' style="border-color:var(--gold)"' : '') + '><h2>' + t + ' (' + list.length + ')</h2><div class="faint">' + sub + '</div>' + list.slice(0, 60).map(leadRow).join('') + '</div>' : ''; };
     return remindersHtml() +
       (all.length ? '' : '<div class="empty">No leads yet. Snap a referral page first.</div>') +
       sec('📞 Call these first', 'Call within ' + ((S.data && S.data.callDays) || 14) + ' days of posting, or the RM' + S.data.rates.lead + ' lead bonus is forfeited. Tap 📞 Called after each call.', toCall, true) +
-      sec('Waiting for an appointment', 'Met them? Tap ☕ (RM ' + S.data.rates.appt + ').', needAppt) +
+      sec('Called · appointment next', 'Agreed to meet? 📅 Set appointment. Not interested? 🚫 No appointment. Met them? ☕ (RM ' + S.data.rates.appt + ').', needAppt) +
       sec('Met, not closed yet', 'Closed a case? Tap 🎯 (RM ' + S.data.rates.close + ').', needClose) +
-      sec('Done', 'Closed cases and leads not counted.', done);
+      sec('Done', 'Closed cases, called with no appointment, and leads not counted.', done);
   }
   viewLeads.wire = wireLeadRows;
 
@@ -1132,6 +1167,15 @@
     var html = '<div class="card"><div class="row">' + avatar(me.id) + '<div class="grow"><div class="name">' + esc(me.name) + '</div><div class="faint">' + (me.leader ? 'Leader' : 'Agent') + ' · REDEFINE</div><div class="faint">🔒 Stays signed in on this phone</div></div></div>' +
       '<div class="tiles" style="margin:12px 0 0"><div class="tile"><div class="k">This month</div><div class="v">' + month.length + '</div></div><a class="tile" href="#/bonus" style="text-decoration:none;color:inherit"><div class="k">Bonus this month</div><div class="v">RM' + bonus.total + '</div><div class="s">approved so far ›</div></a></div>' +
       '<a class="btn block" href="#/leads" style="margin-top:10px">📋 My leads' + (open ? ' · ' + open + ' to follow up' : '') + '</a></div>';
+    var lk = S.data.links || {}, cap = function (app, ico, label, what) {
+      var c = lk[app];
+      return '<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)"><div style="font-size:22px">' + ico + '</div><div class="grow"><b>' + label + '</b><div class="faint">' + what + '</div>' +
+        (c ? '<div class="faint" style="color:var(--good)">✅ Connected' + (c.lastPull ? ' · last update ' + ago(c.lastPull) : ' · waiting for the first update') + '</div>' : '') + '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:4px"><button class="btn sm ' + (c ? '' : 'gold') + '" data-connect="' + app + '">' + (c ? 'Reconnect' : 'Connect') + '</button>' + (c ? '<button class="btn sm danger" data-disconnect="' + app + '">Disconnect</button>' : '') + '</div></div>';
+    };
+    html += '<div class="card"><h2>🔗 Connected apps</h2><div class="faint">Connect once. Then 📞 Called, 📅 Set appointment and ☕ Appointment done are added automatically.</div>' +
+      cap('calendar', '📅', 'REDEFINE Calendar', 'Becomes Approach / appointment events (counts on the team board)') +
+      cap('onfield', '📒', 'REDEFINE On Field', 'Becomes quick logs on the prospect\'s farm (三访)') + '</div>';
     html += '<div class="card"><h2>Settings</h2>' +
       '<label class="check"><input type="checkbox" id="me-music"' + (S.music ? ' checked' : '') + '><span>Team song ♪ (转介绍) · plays when the app opens</span></label>' +
       '<label class="check"><input type="checkbox" id="me-sound"' + (S.sounds ? ' checked' : '') + '><span>Sound for new messages and referrals</span></label>' +
@@ -1159,6 +1203,32 @@
     q('#me-music').onchange = function (e) { S.music = e.target.checked; LS.set('musicOn', S.music); if (S.music) SOUND.startMusic(); else SOUND.stopMusic(); render(); };
     q('#me-sound').onchange = function (e) { S.sounds = e.target.checked; LS.set('sounds', S.sounds); if (S.sounds) SOUND.ding(); };
     if (q('#me-pon')) q('#me-pon').onclick = function () { enablePush(); };
+    root.querySelectorAll('[data-connect]').forEach(function (b) {
+      b.onclick = function () {
+        var app = b.dataset.connect, url = app === 'calendar' ? CALENDAR_URL : ONFIELD_URL, name = app === 'calendar' ? 'REDEFINE Calendar' : 'REDEFINE On Field';
+        b.disabled = true;
+        api('linkCode', {app: app}).then(function (r) {
+          b.disabled = false;
+          var link = url + '#/link-prospecting?code=' + r.code;
+          modal('<h2>Connect ' + name + '</h2><div class="muted">Tap the button below. ' + name + ' opens and connects itself (sign in there if it asks).</div>' +
+            '<div class="btns"><button class="btn" data-n>Close</button><a class="btn gold" href="' + link + '" target="_blank" rel="noopener">Open ' + name + '</a></div>' +
+            '<div class="faint" style="margin-top:14px">Not working? In ' + name + ' go to <b>Me → Connect REDEFINE Prospecting</b> and paste this code:</div>' +
+            '<div style="display:flex;gap:6px;margin-top:6px"><input readonly value="' + r.code + '" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:9px;font-family:monospace;background:var(--bg)"><button class="btn sm" data-copy>Copy</button></div>' +
+            '<div class="faint" style="margin-top:8px">Keep this code private. It lets that app see your lead names and appointment times.</div>', function (m, close) {
+            m.querySelector('[data-n]').onclick = function () { close(); refresh(true); };
+            m.querySelector('[data-copy]').onclick = function () { try { navigator.clipboard.writeText(r.code); toast('Copied', 'Paste it in ' + name + '.'); } catch (e) { m.querySelector('input').select(); } };
+          });
+        }).catch(function (e) { b.disabled = false; toast('Could not connect', errText(e)); });
+      };
+    });
+    root.querySelectorAll('[data-disconnect]').forEach(function (b) {
+      b.onclick = function () {
+        var app = b.dataset.disconnect;
+        confirmBox('Disconnect?', 'New activity will stop going to ' + (app === 'calendar' ? 'REDEFINE Calendar' : 'REDEFINE On Field') + '. What is already there stays.', 'Disconnect', true).then(function (y) {
+          if (y) api('unlinkApp', {app: app}).then(function () { toast('Disconnected', ''); return refresh(true); }).catch(function (e) { toast('Not changed', errText(e)); });
+        });
+      };
+    });
     if (q('#me-pfix')) q('#me-pfix').onclick = function () { repairPush(true); };
     if (q('#me-poff')) q('#me-poff').onclick = function () { confirmBox('Turn off pop-ups?', 'You will miss call reminders, and leads not called in ' + (S.data.callDays || 14) + ' days lose their bonus.', 'Turn off', true).then(function (y) { if (y) pushOff(); }); };
     if (q('#me-ptest')) q('#me-ptest').onclick = function () { toast('Lock your phone now 🔒', 'A pop-up should arrive in about 15 seconds.'); api('pushtest', {delay: 15}).catch(function () {}); };

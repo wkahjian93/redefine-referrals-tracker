@@ -279,6 +279,40 @@ s6.setNow('2026-12-19T03:00:00Z'); CORE.purge(s6);
 ok(Object.keys(s6.photos).length === 0, 'all photos deleted (30 days after approval, and on delete)');
 ok(c6(Object.assign({op: 'sync'}, l6)).posts.find(p => p.id === m6.post.id).photo === 0, 'no photos left after 30 days');
 
+// set appointment + feed for the connected apps (REDEFINE Calendar / On Field)
+const s7 = memStore({now: () => Date.parse('2026-11-21T02:00:00Z')}), c7 = q => CORE.handle(q, s7);
+const a7 = {code: 'test-team', name: 'Link Agent', pin: '1357'}, l7 = {code: 'test-leader-code', name: 'Link Lead', pin: '2468'};
+c7(Object.assign({op: 'signin', create: true}, a7)); c7(Object.assign({op: 'signin', create: true}, l7));
+const p7 = c7(Object.assign({op: 'post', photo: PHOTO, covered: true, rows: [{name: 'Lee Apt'}, {name: 'Ng Nope'}]}, a7));
+const [ra, rb] = s7.tables.refs.filter(r => r.postId === p7.post.id);
+err(() => c7(Object.assign({op: 'step', refId: ra.id, step: 'plan', when: 'tomorrow 3pm'}, a7)), 'bad_time', 'appointment time must be a real date + time');
+const pl = c7(Object.assign({op: 'step', refId: ra.id, step: 'plan', when: '2026-11-23T15:00'}, a7)).ref;
+ok(pl.planAt === '2026-11-23T07:00:00.000Z' && pl.calledAt, 'set appointment 23 Nov 3pm MYT (stored as UTC) and counts as called');
+const no = c7(Object.assign({op: 'step', refId: rb.id, step: 'noappt'}, a7)).ref;
+ok(no.noAppt === 1 && no.calledAt && !no.planAt, 'called but no appointment: counted as called, no appointment needed');
+err(() => c7({op: 'feed', code: 'x'.repeat(28)}), 'bad_link', 'unknown link code refused');
+s7.resetFails();
+const code = c7(Object.assign({op: 'linkCode', app: 'calendar'}, a7)).code;
+ok(code && code.length === 28 && !s7.tables.links.some(l => l.codeHash === code), 'link code made, only its hash stored');
+ok(c7(Object.assign({op: 'sync'}, a7)).links.calendar, 'app knows Calendar is connected');
+s7.setNow('2026-11-21T02:00:30Z');
+const fd = c7({op: 'feed', code});
+ok(fd.agent.name === 'Link Agent' && fd.items.length === 2, 'feed returns this agent leads');
+const fa = fd.items.find(i => i.id === ra.id);
+ok(fa.planAt === '2026-11-23T07:00:00.000Z' && fa.calledAt && fa.name === 'Lee Apt' && !('phone' in fa), 'feed has name, call and appointment time, no phone number');
+s7.setNow('2026-11-21T03:00:00Z');
+ok(c7({op: 'feed', code, since: fd.now}).items.length === 0, 'nothing new since last collect');
+s7.setNow('2026-11-23T08:30:00Z');
+c7(Object.assign({op: 'step', refId: ra.id, step: 'appt'}, a7));
+const fd2 = c7({op: 'feed', code, since: fd.now});
+ok(fd2.items.length === 1 && fd2.items[0].appt === 'pending' && fd2.items[0].apptAt === '2026-11-23T07:00:00.000Z', 'appointment done shows up next collect, dated at the appointment time');
+const code2 = c7(Object.assign({op: 'linkCode', app: 'calendar'}, a7)).code;
+err(() => c7({op: 'feed', code}), 'bad_link', 'new code replaces the old one');
+s7.resetFails();
+c7(Object.assign({op: 'unlinkApp', app: 'calendar'}, a7));
+err(() => c7({op: 'feed', code: code2}), 'bad_link', 'disconnect stops the feed');
+s7.resetFails();
+
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');
 call(Object.assign({op: 'removeAgent', agentId: meiAgent.id, confirm: true}, gm));

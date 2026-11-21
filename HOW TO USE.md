@@ -25,6 +25,10 @@
 
 **Several pages for one client (or both sides of a roadshow sheet)?** Pick them all from the gallery at once, or tap **📷 + Add another photo** on the check screen (up to 6). Each photo is read and covered, all names go into **one record**, and the team sees the photos side by side (swipe). Remove a wrong photo with **✕ Remove photo**.
 
+**Steps for each lead (📋 Leads tab):** 📞 Called → 📅 Set appointment (only if they agreed; pick date + time) or 🚫 No appointment (still counts as called) → ☕ Appointment done → 🎯 Closed.
+
+**Connected apps (Me → 🔗 Connected apps):** connect REDEFINE Calendar and REDEFINE On Field once. After that, every 📞 call, 📅 appointment and ☕ appointment done appears by itself: in Calendar as private events (Approach / appointment, counted on the team board), and in On Field as quick logs on that prospect's farm (the appointment done counts for 三访). The 📒 On Field button on a lead opens that prospect in On Field.
+
 **Asked but got no names?** Snap → **🙋 I asked a client but got no names**. It counts as an *Approach* (effort, not paid).
 
 **After the referral (this is where the bigger bonus is):** the **📋 Leads** tab (bottom bar).

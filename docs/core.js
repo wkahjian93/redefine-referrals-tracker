@@ -8,12 +8,13 @@ var CORE = (function () {
   var TABLES = {
     agents: ['id', 'name', 'pin', 'role', 'created', 'active'],
     posts: ['id', 'agentId', 'kind', 'giver', 'text', 'photoId', 'count', 'status', 'created', 'purged', 'source', 'location', 'selfieId', 'reviewedAt', 'photoRemoved'],
-    refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt', 'called', 'calledAt', 'source'],
+    refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt', 'called', 'calledAt', 'source', 'planAt', 'stepAt', 'noAppt', 'apptMark'],
     comments: ['id', 'postId', 'agentId', 'text', 'created'],
     settings: ['key', 'value'],
     log: ['at', 'by', 'action', 'detail'],
     sessions: ['token', 'agentId', 'created', 'lastSeen', 'device'],
-    devices: ['token', 'agentId', 'created']
+    devices: ['token', 'agentId', 'created'],
+    links: ['codeHash', 'agentId', 'app', 'created', 'lastPull']
   };
   var CALL_DAYS = 14;                   // a lead must be called within 14 days of posting, or its lead bonus is forfeited
   var CALL_REMIND_DAYS = 7;             // from day 7 the agent gets a daily lock-screen reminder to call
@@ -247,7 +248,7 @@ var CORE = (function () {
   /* ---------- reading everything the app shows ---------- */
   function publicRef(r, mine) {
     var o = {id: r.id, postId: r.postId, agentId: r.agentId, name: r.name, status: r.status, dup: '', created: r.created, purged: r.purged ? 1 : 0,
-      appt: r.appt || '', apptAt: r.apptAt || '', close: r.close || '', closeAt: r.closeAt || '', calledAt: r.calledAt || '', source: r.source || 'referral'};
+      appt: r.appt || '', apptAt: r.apptAt || '', close: r.close || '', closeAt: r.closeAt || '', calledAt: r.calledAt || '', source: r.source || 'referral', planAt: r.planAt || '', noAppt: r.noAppt ? 1 : 0};
     if (mine) o.dup = r.dup;
     if (mine && !r.purged) { o.age = r.age; o.phone = r.phone; o.gender = r.gender; o.remarks = r.remarks; }
     return o;
@@ -260,7 +261,7 @@ var CORE = (function () {
     return {
       ver: v, now: nowIso(store), keepDays: KEEP_DAYS,
       me: {id: me.id, name: me.name, leader: leader, devices: store.load('devices').filter(function (d) { return d.agentId === me.id; }).length},
-      callDays: CALL_DAYS, callRemindDays: CALL_REMIND_DAYS,
+      callDays: CALL_DAYS, callRemindDays: CALL_REMIND_DAYS, links: linksOf(store, me),
       agents: store.load('agents').filter(function (a) { return String(a.active) !== 'false'; }).map(function (a) { return {id: a.id, name: a.name, role: a.role}; }),
       posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, source: p.source || 'referral', location: p.location || '', selfie: p.selfieId && !p.purged ? 1 : 0, photo: p.purged ? 0 : photoIdsOf(p).length, photoRemoved: p.photoRemoved || '', reviewedAt: p.reviewedAt || '', photoDays: PHOTO_DAYS, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
       refs: store.load('refs').map(function (r) { return publicRef(r, leader || r.agentId === me.id); }),
@@ -363,13 +364,29 @@ var CORE = (function () {
   function step(q, store, me, leader) {
     var refs = store.load('refs'), r = refs.filter(function (x) { return x.id === q.refId; })[0], kind = q.step, on = q.done !== false;
     if (!r) fail('not_found');
-    if (kind !== 'appt' && kind !== 'close' && kind !== 'call') fail('bad_request');
+    if (kind !== 'appt' && kind !== 'close' && kind !== 'call' && kind !== 'plan' && kind !== 'noappt') fail('bad_request');
     if (r.agentId !== me.id && !leader) fail('not_yours');
     if (r.status === 'rejected') fail('lead_not_counted');
+    if (kind === 'noappt') {   // 🚫 called, but no appointment: still counts as called (lead bonus kept), just leaves the to-do list
+      if (on) { if (r.appt === 'pending' || r.appt === 'approved') fail('undo_appt_first'); r.noAppt = 'yes'; r.planAt = ''; if (!r.calledAt) { r.called = 'yes'; r.calledAt = nowIso(store); } }
+      else r.noAppt = '';
+      r.stepAt = nowIso(store); store.save('refs', refs); store.version(true); log(store, me.id, 'step', r.id + ' noappt ' + (on ? 'yes' : 'undo'));
+      return {ref: publicRef(r, true)};
+    }
+    if (kind === 'plan') {   // 📅 set appointment: date + time (Malaysia time) of the meeting with the lead
+      if (on) {
+        var when = str(q.when, 16); if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(when)) fail('bad_time');
+        var ms = new Date(when + ':00+08:00').getTime(); if (!isFinite(ms)) fail('bad_time');
+        r.planAt = new Date(ms).toISOString(); r.noAppt = '';
+        if (!r.calledAt) { r.called = 'yes'; r.calledAt = nowIso(store); }   // setting an appointment means they were called
+      } else { if (r.appt === 'pending' || r.appt === 'approved') fail('undo_appt_first'); r.planAt = ''; }
+      r.stepAt = nowIso(store); store.save('refs', refs); store.version(true); log(store, me.id, 'step', r.id + ' plan ' + (on ? r.planAt : 'undo'));
+      return {ref: publicRef(r, true)};
+    }
     if (kind === 'call') {   // the agent's own record, no approval needed; it decides whether the lead bonus is kept
       if (on) { if (r.calledAt) fail('already_marked'); r.called = 'yes'; r.calledAt = nowIso(store); }
       else { if (r.appt === 'pending' || r.appt === 'approved') fail('undo_appt_first'); r.called = ''; r.calledAt = ''; }
-      store.save('refs', refs); store.version(true); log(store, me.id, 'step', r.id + ' call ' + (on ? 'done' : 'undo'));
+      r.stepAt = nowIso(store); store.save('refs', refs); store.version(true); log(store, me.id, 'step', r.id + ' call ' + (on ? 'done' : 'undo'));
       return {ref: publicRef(r, true)};
     }
     var at = kind + 'At';
@@ -378,12 +395,14 @@ var CORE = (function () {
       if (kind === 'close' && !(r.appt === 'pending' || r.appt === 'approved')) fail('appointment_first');
       r[kind] = leader ? 'approved' : 'pending'; r[at] = nowIso(store);
       if (kind === 'appt' && !r.calledAt) { r.called = 'yes'; r.calledAt = r[at]; }   // met them = called them
+      if (kind === 'appt' && r.planAt && new Date(r.planAt).getTime() <= store.now().getTime()) r[at] = r.planAt;   // done = at the appointment time that was set
+      if (kind === 'appt') r.apptMark = nowIso(store);   // when it was marked (connected apps use it to tell a redo from the old entry)
     } else {
       if (r[kind] === 'approved' && !leader) fail('approved_ask_leader');
       if (kind === 'appt' && (r.close === 'pending' || r.close === 'approved')) fail('undo_close_first');
       r[kind] = ''; r[at] = '';
     }
-    store.save('refs', refs); store.version(true);
+    r.stepAt = nowIso(store); store.save('refs', refs); store.version(true);
     log(store, me.id, 'step', r.id + ' ' + kind + ' ' + (on ? 'done' : 'undo'));
     if (on && leader) celebrate(store, r, kind);
     return {ref: publicRef(r, true)};
@@ -408,6 +427,7 @@ var CORE = (function () {
         r[k] = x[k]; n++; if (x[k] === 'approved') done.push([r, k]);
       });
     });
+    done.forEach(function (p) { p[0].stepAt = nowIso(store); });
     store.save('refs', refs);
     done.forEach(function (p) { celebrate(store, p[0], p[1]); });
     var R = rates(store), per = {};
@@ -491,9 +511,49 @@ var CORE = (function () {
     if (!a) fail('not_found'); if (a.id === me.id) fail('cannot_remove_self');
     a.active = 'false'; store.save('agents', agents); store.version(true);
     store.save('sessions', store.load('sessions').filter(function (x) { return x.agentId !== a.id; }));
-    store.save('devices', store.load('devices').filter(function (x) { return x.agentId !== a.id; }));   // signs them out on every phone
+    store.save('devices', store.load('devices').filter(function (x) { return x.agentId !== a.id; }));
+    store.save('links', store.load('links').filter(function (x) { return x.agentId !== a.id; }));   // signs them out on every phone
     log(store, me.id, 'remove_agent', a.name);
     return {ok: true};
+  }
+
+  /* ---------- connect other REDEFINE apps (REDEFINE Calendar, REDEFINE On Field) ----------
+     The agent asks for a private link code here and gives it to the other app once. That app then collects this
+     agent's lead activity (called / appointment set / appointment done) with the code and adds it to its own records.
+     Only a hash of the code is stored. A new code replaces the old one; Disconnect removes it. */
+  var LINK_APPS = {calendar: 1, onfield: 1};
+  function linkCode(q, store, me) {
+    var app = str(q.app, 12); if (!LINK_APPS[app]) fail('bad_request');
+    var code = newId(store, 28), rows = store.load('links').filter(function (l) { return !(l.agentId === me.id && l.app === app); });
+    rows.push({codeHash: store.hash('link|' + code), agentId: me.id, app: app, created: nowIso(store), lastPull: ''});
+    store.save('links', rows); log(store, me.id, 'link', app);
+    return {code: code, app: app};
+  }
+  function unlinkApp(q, store, me) {
+    var app = str(q.app, 12);
+    store.save('links', store.load('links').filter(function (l) { return !(l.agentId === me.id && (!app || l.app === app)); }));
+    return {unlinked: true};
+  }
+  function linksOf(store, me) {
+    var o = {}; store.load('links').forEach(function (l) { if (l.agentId === me.id) o[l.app] = {created: l.created, lastPull: l.lastPull}; }); return o;
+  }
+  /* what the connected app collects: this agent's leads whose steps changed after `since` (or the last 120 days) */
+  function feed(q, store) {
+    var h = store.hash('link|' + str(q.code, 60)), links = store.load('links'), l = links.filter(function (x) { return x.codeHash === h; })[0];
+    if (!l) { store.fails(1); fail('bad_link'); }
+    var a = store.load('agents').filter(function (x) { return x.id === l.agentId; })[0];
+    if (!a || String(a.active) === 'false') fail('removed');
+    var since = str(q.since, 30), cut = store.now().getTime() - 120 * 864e5, now = nowIso(store);
+    var items = store.load('refs').filter(function (r) {
+      if (r.agentId !== a.id) return false;
+      var t = r.stepAt || r.created; if (new Date(r.created).getTime() < cut && !r.stepAt) return false;
+      return !since || t >= since;   // at-or-after: an item stamped in the same instant as the last collect is not missed (re-sending is harmless)
+    }).slice(-300).map(function (r) {
+      return {id: r.id, name: r.name, source: r.source || 'referral', status: r.status, created: r.created, calledAt: r.calledAt || '',
+        planAt: r.planAt || '', appt: r.appt || '', apptAt: r.apptAt || '', apptMark: r.apptMark || '', noAppt: r.noAppt ? 1 : 0, stepAt: r.stepAt || r.created};
+    });
+    l.lastPull = now; store.save('links', links);
+    return {agent: {name: a.name}, app: l.app, now: now, items: items};
   }
 
   /* ---------- phone pop-ups (Firebase), same setup as REDEFINE Calendar ---------- */
@@ -638,13 +698,14 @@ var CORE = (function () {
     return {wiped: n, photos: ph};
   }
 
-  var OPS = {emailReport: emailReport, addSelfie: addSelfie, pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
+  var OPS = {linkCode: linkCode, unlinkApp: unlinkApp, emailReport: emailReport, addSelfie: addSelfie, pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
 
   function handle(q, store) {
     if (!q || typeof q !== 'object') fail('bad_request');
     if (q.op === 'signin') {
       return store.withLock(function () { var r = signIn(q, store); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.role === 'leader'}, created: !!r.created, token: newSession(store, r.me, q.device)}; });
     }
+    if (q.op === 'feed') return store.withLock(function () { var r = feed(q, store); r.ok = true; return r; });
     if (q.op === 'pushtest' && q.delay) {   // "test in 15 s": wait OUTSIDE the lock so nobody else is blocked
       var w1 = store.withLock(function () { return who(q, store).me; });
       if (store.sleep) store.sleep(Math.max(1, Math.min(20, +q.delay || 15)) * 1000);
