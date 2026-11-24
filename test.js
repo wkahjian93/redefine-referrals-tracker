@@ -131,7 +131,7 @@ const all = call(Object.assign({op: 'sync'}, gm)), month = CORE.monthKey(s.now()
 const row = CORE.bonusTable(all.agents, all.posts, all.refs, month, all.rates).find(x => x.name === 'Ali Tan');
 ok(row.approach === 2 && row.leads === 2 && row.appt === 1 && row.close === 1, 'statement counts ' + JSON.stringify(row));
 ok(row.total === 2 * 1 + 5 + 20, 'total = 2xRM1 + RM5 + RM20 = RM27');
-const meiRow = CORE.bonusTable(all.agents, all.posts, all.refs, month, all.rates).find(x => x.name === 'Mei Ling');
+const meiRow = CORE.bonusTable(all.agents, all.posts, all.refs, month, all.rates, s.now().toISOString()).find(x => x.name === 'Mei Ling');
 ok(meiRow.leads === 0 && meiRow.leadsWaiting === 1 && meiRow.total === 0, 'leads waiting approval are not paid yet');
 call(Object.assign({op: 'settings', confirm: true, rates: {lead: '2'}}, gm));
 ok(CORE.bonusTable(all.agents, all.posts, all.refs, month, call(Object.assign({op: 'sync'}, gm)).rates).find(x => x.name === 'Ali Tan').total === 29, 'leader can change a rate');
@@ -312,6 +312,18 @@ s7.resetFails();
 c7(Object.assign({op: 'unlinkApp', app: 'calendar'}, a7));
 err(() => c7({op: 'feed', code: code2}), 'bad_link', 'disconnect stops the feed');
 s7.resetFails();
+
+// wrong tries lock out only that name, not the whole team
+const s8 = memStore(), c8 = q => CORE.handle(q, s8);
+c8({op: 'signin', create: true, code: 'test-team', name: 'Old Hand', pin: '1111'});
+for (let i = 0; i < 9; i++) { try { c8({op: 'signin', code: 'wrong-code', name: 'Typo Person', pin: '1234'}); } catch (e) {} }
+err(() => c8({op: 'signin', create: true, code: 'test-team', name: 'Typo Person', pin: '1234'}), 'too_many_tries', 'the name with 8+ wrong tries waits 15 minutes');
+ok(c8({op: 'signin', create: true, code: 'test-team', name: 'Min Hwa', pin: '2468'}).created, 'a NEW agent can still sign up while someone else is locked out');
+ok(c8({op: 'signin', code: 'test-team', name: 'Old Hand', pin: '1111'}).ok, 'existing agents can still sign in');
+for (let i = 0; i < 12; i++) { try { c8({op: 'feed', code: 'z'.repeat(28)}); } catch (e) {} }
+ok(c8({op: 'signin', create: true, code: 'test-team', name: 'After Links', pin: '1357'}).created, 'old link codes (Calendar / On Field) never block sign-ins');
+for (let i = 0; i < 61; i++) { try { c8({op: 'signin', code: 'guess' + i, name: 'Bot ' + i, pin: '0000'}); } catch (e) {} }
+err(() => c8({op: 'signin', create: true, code: 'test-team', name: 'Late Comer', pin: '1234'}), 'too_many_tries', 'mass guessing (60+ wrong tries) still locks the door');
 
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');

@@ -1,7 +1,7 @@
 /* REDEFINE Referrals Tracker - server rules.
    Shared by the Google server (server/Code.gs, built by build.js), the local test server and test.js.
    handle(q, store) checks who is asking, validates every input, and reads/writes through `store`.
-   A store provides: load(table), save(table, rows), withLock(fn), prop(key), fails(add), now(), random(),
+   A store provides: load(table), save(table, rows), withLock(fn), prop(key), fails(add, key) (wrong-try counter per key, 15 min), now(), random(),
    hash(text) -> hex, putPhoto(name, base64) -> id, getPhoto(id) -> base64, trashPhoto(id),
    ai(prompt, imageBase64) -> text, version(bump) -> number. */
 var CORE = (function () {
@@ -53,15 +53,17 @@ var CORE = (function () {
     var code = str(q.code, 100), name = str(q.name, 40).replace(/\s+/g, ' '), pin = str(q.pin, 12);
     var team = store.prop('TEAM_CODE'), leader = store.prop('LEADER_CODE');
     if (!team || team.length < 6) fail('server_not_set_up');
-    if (!quiet && store.fails() >= 8) fail('too_many_tries');
+    // wrong tries are counted PER NAME (one person's typos never lock out the rest of the team) + a high team-wide limit against guessing
+    var fk = 'n:' + normName(name).slice(0, 40);
+    if (!quiet && (store.fails(0, fk) >= 8 || store.fails(0, 'all') >= 60)) fail('too_many_tries');
     var role = leader && leader.length >= 10 && code === leader ? 'leader' : code === team ? 'agent' : '';
-    if (!role) { store.fails(1); fail('wrong_code'); }
+    if (!role) { store.fails(1, fk); store.fails(1, 'all'); fail('wrong_code'); }
     if (name.length < 2) fail('name_needed');
     if (!/^\d{4,6}$/.test(pin)) fail('pin_4_digits');
     var agents = store.load('agents'), me = agents.filter(function (a) { return normName(a.name) === normName(name); })[0];
     var h = store.hash('rrt|' + pin + '|' + normName(name));
     if (me) {
-      if (me.pin !== h) { store.fails(1); fail('wrong_pin'); }
+      if (me.pin !== h) { store.fails(1, fk); store.fails(1, 'all'); fail('wrong_pin'); }
       if (String(me.active) === 'false') fail('removed');
       if (role === 'leader' && me.role !== 'leader') { me.role = 'leader'; store.save('agents', agents); }
       return {me: me, role: role === 'leader' ? 'leader' : me.role};
@@ -540,7 +542,7 @@ var CORE = (function () {
   /* what the connected app collects: this agent's leads whose steps changed after `since` (or the last 120 days) */
   function feed(q, store) {
     var h = store.hash('link|' + str(q.code, 60)), links = store.load('links'), l = links.filter(function (x) { return x.codeHash === h; })[0];
-    if (!l) { store.fails(1); fail('bad_link'); }
+    if (!l) { store.fails(1, 'link'); fail('bad_link'); }   // old link codes (after Reconnect) never count towards sign-in lock-outs
     var a = store.load('agents').filter(function (x) { return x.id === l.agentId; })[0];
     if (!a || String(a.active) === 'false') fail('removed');
     var since = str(q.since, 30), cut = store.now().getTime() - 120 * 864e5, now = nowIso(store);

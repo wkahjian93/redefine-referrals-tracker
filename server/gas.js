@@ -141,7 +141,7 @@ var GAS = (function () {
     load: load, save: save,
     withLock: function (fn) { var l = LockService.getScriptLock(); l.waitLock(20000); try { cache = {}; return fn(); } finally { l.releaseLock(); } },
     prop: function (k) { return P.getProperty(k) || ''; },
-    fails: function (add) { var c = CacheService.getScriptCache(), n = +(c.get('fails') || 0); if (add) { c.put('fails', String(n + add), 900); Utilities.sleep(800); } return n; },
+    fails: function (add, key) { var c = CacheService.getScriptCache(), k = 'fails_' + Utilities.base64EncodeWebSafe(String(key || 'all')).slice(0, 200), n = +(c.get(k) || 0); if (add) { c.put(k, String(n + add), 900); Utilities.sleep(800); } return n; },
     now: function () { return new Date(); },
     random: Math.random,
     hash: function (t) { return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, t, Utilities.Charset.UTF_8).map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join(''); },

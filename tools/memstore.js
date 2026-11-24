@@ -3,7 +3,7 @@
 const crypto = require('crypto'), fs = require('fs'), path = require('path');
 module.exports = function memStore(opts = {}) {
   const tables = {}, photos = {}, props = Object.assign({TEAM_CODE: 'test-team', LEADER_CODE: 'test-leader-code'}, opts.props || {});
-  let ver = 1, fails = 0, clock = opts.now ? opts.now() : null, n = 0;
+  let ver = 1, fails = {}, clock = opts.now ? opts.now() : null, n = 0;
   const store = {
     tables, photos, props, prompts: [], pushes: [],
     push: (ids, note) => { if (ids && ids.length) store.pushes.push({ids, note}); },   // phone pop-ups are recorded, not sent
@@ -13,8 +13,8 @@ module.exports = function memStore(opts = {}) {
     save: (t, rows) => { tables[t] = JSON.parse(JSON.stringify(rows)); },
     withLock: fn => fn(),
     prop: k => props[k] || '',
-    fails: add => { if (add) fails += add; return fails; },
-    resetFails: () => { fails = 0; },
+    fails: (add, key) => { const k = key || 'all'; if (add) fails[k] = (fails[k] || 0) + add; return fails[k] || 0; },
+    resetFails: () => { fails = {}; },
     now: () => clock ? new Date(clock) : new Date(),
     setNow: d => { clock = d ? new Date(d).getTime() : null; },
     random: opts.random || Math.random,
