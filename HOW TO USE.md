@@ -75,6 +75,7 @@
 - **Me → Leader settings:** the three rates (default RM1 / RM5 / RM20 from your sheet). Approach is counted, not paid.
 - **Which month an item counts in:** a lead counts in the month the page was posted, an appointment or close in the month the agent tapped it. Only approved items are paid.
 - **Me → Team members:** remove someone who left. Their past referrals stay on the board.
+- **Agent forgot their PIN?** Me → Team members → **🔑 Reset PIN** next to their name → you get a temporary 6-digit PIN (Copy / WhatsApp; send it privately). They sign in with their name + the temporary PIN, and the app makes them choose their own PIN right away. Their referrals, leads and bonus are not touched. Resetting also clears their wrong-try lock.
 - An agent can delete their own page only while it is waiting or not counted. Once approved, only you can delete it.
 - Everything important (posting, approving, deleting, changing the rate, removing a member) asks **"Are you sure?"** first.
 
@@ -82,6 +83,7 @@
 - **iPhone:** open the link in Safari → Share → **Add to Home Screen**.
 - **Android:** open in Chrome → ⋮ → **Add to Home screen**.
 - First time: team code (from leader) + your name + choose a 4-digit PIN.
+- Forgot your PIN? Ask your leader to reset it. To change your PIN yourself: Me → **🔑 Change my PIN**.
 
 ## Good to know
 - **Alerts:** pop-up + sound + red badge while the app is open. In **Me → Phone pop-up alerts → Turn on**, it also alerts while the app is in the background (Android; iPhone only after Add to Home Screen). Alerts when the app is fully closed are not built yet.

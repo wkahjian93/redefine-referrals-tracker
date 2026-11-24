@@ -6,7 +6,7 @@
    ai(prompt, imageBase64) -> text, version(bump) -> number. */
 var CORE = (function () {
   var TABLES = {
-    agents: ['id', 'name', 'pin', 'role', 'created', 'active'],
+    agents: ['id', 'name', 'pin', 'role', 'created', 'active', 'pinTemp'],
     posts: ['id', 'agentId', 'kind', 'giver', 'text', 'photoId', 'count', 'status', 'created', 'purged', 'source', 'location', 'selfieId', 'reviewedAt', 'photoRemoved'],
     refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt', 'called', 'calledAt', 'source', 'planAt', 'stepAt', 'noAppt', 'apptMark'],
     comments: ['id', 'postId', 'agentId', 'text', 'created'],
@@ -262,7 +262,7 @@ var CORE = (function () {
     var recent = function (x) { return new Date(x.created).getTime() >= cut; };
     return {
       ver: v, now: nowIso(store), keepDays: KEEP_DAYS,
-      me: {id: me.id, name: me.name, leader: leader, devices: store.load('devices').filter(function (d) { return d.agentId === me.id; }).length},
+      me: {id: me.id, name: me.name, leader: leader, mustChange: me.pinTemp === 'true', devices: store.load('devices').filter(function (d) { return d.agentId === me.id; }).length},
       callDays: CALL_DAYS, callRemindDays: CALL_REMIND_DAYS, links: linksOf(store, me),
       agents: store.load('agents').filter(function (a) { return String(a.active) !== 'false'; }).map(function (a) { return {id: a.id, name: a.name, role: a.role}; }),
       posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, source: p.source || 'referral', location: p.location || '', selfie: p.selfieId && !p.purged ? 1 : 0, photo: p.purged ? 0 : photoIdsOf(p).length, photoRemoved: p.photoRemoved || '', reviewedAt: p.reviewedAt || '', photoDays: PHOTO_DAYS, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
@@ -506,6 +506,27 @@ var CORE = (function () {
     return out;
   }
 
+  /* Forgot PIN: the leader gives a temporary 6-digit PIN; the agent must choose their own at the next sign-in.
+     Everything the agent posted stays. Other phones already signed in stay signed in. */
+  function resetPin(q, store, me, leader) {
+    if (!leader) fail('leader_only');
+    if (q.confirm !== true) fail('confirm_needed');
+    var agents = store.load('agents'), a = agents.filter(function (x) { return x.id === q.agentId; })[0];
+    if (!a || String(a.active) === 'false') fail('not_found');
+    var temp = ''; for (var i = 0; i < 6; i++) temp += Math.floor(store.random() * 10);
+    a.pin = store.hash('rrt|' + temp + '|' + normName(a.name)); a.pinTemp = 'true';
+    store.save('agents', agents); store.fails(-store.fails(0, 'n:' + normName(a.name).slice(0, 40)), 'n:' + normName(a.name).slice(0, 40));   // clear their lock-out
+    log(store, me.id, 'reset_pin', a.name);
+    return {name: a.name, temp: temp};
+  }
+  function changePin(q, store, me) {
+    var pin = str(q.pin, 12); if (!/^\d{4,6}$/.test(pin)) fail('pin_4_digits');
+    var agents = store.load('agents'), a = agents.filter(function (x) { return x.id === me.id; })[0];
+    a.pin = store.hash('rrt|' + pin + '|' + normName(a.name)); a.pinTemp = '';
+    store.save('agents', agents); log(store, me.id, 'change_pin', '');
+    return {changed: true};
+  }
+
   function removeAgent(q, store, me, leader) {
     if (!leader) fail('leader_only');
     if (q.confirm !== true) fail('confirm_needed');
@@ -700,12 +721,12 @@ var CORE = (function () {
     return {wiped: n, photos: ph};
   }
 
-  var OPS = {linkCode: linkCode, unlinkApp: unlinkApp, emailReport: emailReport, addSelfie: addSelfie, pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
+  var OPS = {resetPin: resetPin, changePin: changePin, linkCode: linkCode, unlinkApp: unlinkApp, emailReport: emailReport, addSelfie: addSelfie, pushreg: pushReg, pushoff: pushOff, pushtest: pushTest, signout: signOut, upgrade: function (q, store, me) { return {token: newSession(store, me, q.device)}; }, step: step, stepReview: stepReview, approach: approach, markPaid: markPaid, post: post, sync: sync, photo: photo, comment: comment, review: review, removePost: removePost, settings: saveSettings, removeAgent: removeAgent};
 
   function handle(q, store) {
     if (!q || typeof q !== 'object') fail('bad_request');
     if (q.op === 'signin') {
-      return store.withLock(function () { var r = signIn(q, store); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.role === 'leader'}, created: !!r.created, token: newSession(store, r.me, q.device)}; });
+      return store.withLock(function () { var r = signIn(q, store); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.role === 'leader'}, created: !!r.created, mustChange: r.me.pinTemp === 'true', token: newSession(store, r.me, q.device)}; });
     }
     if (q.op === 'feed') return store.withLock(function () { var r = feed(q, store); r.ok = true; return r; });
     if (q.op === 'pushtest' && q.delay) {   // "test in 15 s": wait OUTSIDE the lock so nobody else is blocked

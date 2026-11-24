@@ -325,6 +325,26 @@ ok(c8({op: 'signin', create: true, code: 'test-team', name: 'After Links', pin: 
 for (let i = 0; i < 61; i++) { try { c8({op: 'signin', code: 'guess' + i, name: 'Bot ' + i, pin: '0000'}); } catch (e) {} }
 err(() => c8({op: 'signin', create: true, code: 'test-team', name: 'Late Comer', pin: '1234'}), 'too_many_tries', 'mass guessing (60+ wrong tries) still locks the door');
 
+// forgot PIN: leader gives a temporary PIN, agent must choose a new one
+const s9 = memStore(), c9 = q => CORE.handle(q, s9);
+const L9 = {code: 'test-leader-code', name: 'Boss Nine', pin: '9999'};
+c9(Object.assign({op: 'signin', create: true}, L9));
+c9({op: 'signin', create: true, code: 'test-team', name: 'Min Hwa', pin: '1234'});
+for (let i = 0; i < 9; i++) { try { c9({op: 'signin', code: 'test-team', name: 'Min Hwa', pin: '0000'}); } catch (e) {} }
+err(() => c9({op: 'signin', code: 'test-team', name: 'Min Hwa', pin: '1234'}), 'too_many_tries', 'forgot PIN, kept trying: locked out');
+const minId = s9.tables.agents.find(a => a.name === 'Min Hwa').id;
+err(() => c9({op: 'resetPin', agentId: minId, confirm: true, code: 'test-team', name: 'Min Hwa', pin: '1234'}), 'leader_only', 'an agent cannot reset PINs');
+err(() => c9(Object.assign({op: 'resetPin', agentId: minId}, L9)), 'confirm_needed', 'reset needs confirm');
+const rp9 = c9(Object.assign({op: 'resetPin', agentId: minId, confirm: true}, L9));
+ok(/^\d{6}$/.test(rp9.temp) && rp9.name === 'Min Hwa', 'leader gets a 6-digit temporary PIN');
+const sn1 = c9({op: 'signin', code: 'test-team', name: 'Min Hwa', pin: rp9.temp});
+ok(sn1.ok && sn1.mustChange === true, 'temporary PIN works at once (lock-out cleared) and asks for a new PIN');
+err(() => c9({op: 'signin', code: 'test-team', name: 'Min Hwa', pin: '1234'}), 'wrong_pin', 'the forgotten old PIN no longer works');
+ok(c9({op: 'changePin', token: sn1.token, pin: '2580'}).changed, 'agent chooses a new PIN');
+const sn2 = c9({op: 'signin', code: 'test-team', name: 'Min Hwa', pin: '2580'});
+ok(sn2.ok && !sn2.mustChange, 'new PIN works, no more prompt');
+err(() => c9({op: 'changePin', token: sn1.token, pin: '12'}), 'pin_4_digits', 'PIN must be 4-6 digits');
+
 // leader removes a member -> their phones are signed out
 const meiAgent = s.tables.agents.find(a => a.name === 'Mei Ling');
 call(Object.assign({op: 'removeAgent', agentId: meiAgent.id, confirm: true}, gm));

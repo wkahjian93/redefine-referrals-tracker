@@ -78,6 +78,27 @@
       });
     });
   }
+  // choose a new PIN: forced after the leader resets it (temporary PIN), or by choice from Me
+  function askNewPin(forced) {
+    if (S.pinOpen && document.getElementById('np1')) return; S.pinOpen = true;
+    modal('<h2>' + (forced ? '🔑 Choose your own PIN' : '🔑 Change my PIN') + '</h2><div class="muted">' + (forced ? 'You signed in with a temporary PIN from your leader. Choose your own PIN now (4–6 digits) and remember it.' : 'Choose a new PIN (4–6 digits). You need it only if you sign in again on a phone.') + '</div>' +
+      '<label class="field" style="margin-top:10px"><span>New PIN</span><input id="np1" inputmode="numeric" type="password" maxlength="6"></label>' +
+      '<label class="field"><span>Type it again</span><input id="np2" inputmode="numeric" type="password" maxlength="6"></label>' +
+      '<div class="err" id="np-err"></div><div class="btns">' + (forced ? '' : '<button class="btn" data-n>Cancel</button>') + '<button class="btn gold" data-y>Save my PIN</button></div>', function (m, close) {
+      var done = function () { S.pinOpen = false; close(); };
+      if (forced) { var bg = m; bg.addEventListener('click', function (e) { if (e.target === bg) e.stopImmediatePropagation(); }, true); }
+      if (m.querySelector('[data-n]')) m.querySelector('[data-n]').onclick = done;
+      m.addEventListener('click', function (e) { if (!forced && e.target === m) S.pinOpen = false; });
+      m.querySelector('[data-y]').onclick = function () {
+        var a = m.querySelector('#np1').value.trim(), b = m.querySelector('#np2').value.trim(), err = m.querySelector('#np-err'), btn = this;
+        if (!/^\d{4,6}$/.test(a)) { err.textContent = ERR.pin_4_digits; return; }
+        if (a !== b) { err.textContent = 'The two PINs are not the same.'; return; }
+        btn.disabled = true; btn.textContent = 'Saving…';
+        api('changePin', {pin: a}).then(function () { if (S.data && S.data.me) S.data.me.mustChange = false; S.ver = 0; saveCache(); done(); toast('PIN saved 🔑', 'Use this PIN next time you sign in.'); refresh(true); })
+          .catch(function (e) { btn.disabled = false; btn.textContent = 'Save my PIN'; err.textContent = errText(e); });
+      };
+    });
+  }
   function notifyPhone(title, body, tag) {
     if (!document.hidden || !('Notification' in window) || Notification.permission !== 'granted' || pushOn()) return;   // real lock-screen pop-ups come from the server instead
     try {
@@ -104,11 +125,12 @@
   function teamMonthTotal() { var mk = monthKey(new Date().toISOString()); return S.data ? S.data.refs.filter(function (r) { return r.status !== 'rejected' && monthKey(r.created) === mk; }).length : 0; }
   function refresh(silent) {
     return api('sync', {ver: S.ver}).then(function (d) {
-      if (d.same) return false;
+      if (d.same) { if (S.data && S.data.me && S.data.me.mustChange) setTimeout(function () { askNewPin(true); }, 400); return false; }
       var first = !S.data; S.data = d; S.ver = d.ver; S.offline = false;
       saveCache();
       announce(first);
       cashIn();
+      if (d.me && d.me.mustChange) setTimeout(function () { askNewPin(true); }, 400);
       if (pushOn() && d.me.devices === 0 && !S.repairTried) { S.repairTried = true; repairPush(false); }   // server lost this phone: reconnect quietly
       return true;
     }).catch(function (e) {
@@ -299,7 +321,8 @@
       '<label class="field"><span>Team code (from your leader)</span><input id="si-code" autocomplete="off" autocapitalize="off"></label>' +
       '<label class="field"><span>Your name (as the team knows you)</span><input id="si-name" value="' + esc(last) + '" autocomplete="name"></label>' +
       '<label class="field"><span>Your PIN (4–6 digits; new members choose one now)</span><input id="si-pin" inputmode="numeric" type="password" maxlength="6"></label>' +
-      '<div class="err" id="si-err"></div><button class="btn gold block" id="si-go">Enter</button></div></div>';
+      '<div class="err" id="si-err"></div><button class="btn gold block" id="si-go">Enter</button>' +
+      '<p style="margin-top:14px;font-size:13px;opacity:.85">Forgot your PIN? Ask your leader to reset it (Me → Team members → 🔑 Reset PIN). Sign in with the temporary PIN, then choose your own.</p></div></div>';
     document.getElementById('si-go').onclick = function () { doSignIn(false); };
     document.getElementById('si-pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSignIn(false); });
   }
@@ -312,7 +335,7 @@
       S.auth = {token: r.token, name: r.me.name}; LS.set('auth', S.auth); LS.set('lastName', r.me.name);   // the phone keeps only its device key, not the code or PIN
       keepStorage();
       if (r.created) toast('Welcome to the team board', 'Snap your first referral page to get on the board!');
-      S.data = null; render(); return refresh().then(function () { startPolling(); route(); });
+      S.data = null; S.ver = 0; render(); return refresh().then(function () { startPolling(); route(); if (r.mustChange) setTimeout(function () { askNewPin(true); }, 400); });
     }).catch(function (e) {
       btn.disabled = false; btn.textContent = 'Enter';
       if (e.message === 'new_name') {
@@ -1189,10 +1212,11 @@
       html += '<div class="card"><h2>Leader settings · bonus rates (RM)</h2><div class="tiles" style="grid-template-columns:1fr 1fr 1fr;margin:8px 0">' +
         [['lead', 'Per lead'], ['appt', 'Per appointment'], ['close', 'Per close']].map(function (x) { return '<label class="field" style="margin:0"><span>' + x[1] + '</span><input data-rate="' + x[0] + '" inputmode="decimal" value="' + R[x[0]] + '"></label>'; }).join('') +
         '</div><button class="btn sm primary" id="me-rate-save">Save rates</button><span class="faint"> Approach is counted, not paid.</span>' +
-        '<h3 style="margin-top:16px">Team members (' + S.data.agents.length + ')</h3>' + S.data.agents.map(function (a) { return '<div class="row" style="padding:5px 0">' + avatar(a.id, true) + '<div class="grow">' + esc(a.name) + (a.role === 'leader' ? ' <span class="faint">leader</span>' : '') + '</div>' + (a.id !== me.id ? '<button class="btn sm danger" data-rm="' + a.id + '">Remove</button>' : '') + '</div>'; }).join('') + '</div>';
+        '<h3 style="margin-top:16px">Team members (' + S.data.agents.length + ')</h3>' + S.data.agents.map(function (a) { return '<div class="row" style="padding:5px 0">' + avatar(a.id, true) + '<div class="grow">' + esc(a.name) + (a.role === 'leader' ? ' <span class="faint">leader</span>' : '') + '</div>' + (a.id !== me.id ? '<button class="btn sm" data-rpin="' + a.id + '">🔑 Reset PIN</button> <button class="btn sm danger" data-rm="' + a.id + '">Remove</button>' : '') + '</div>'; }).join('') + '</div>';
     }
     html += '<div class="card"><h2>Privacy rules</h2><ul class="steps muted"><li>📷 The original photo is read once by AI and never saved. Only the covered photo is kept.</li><li>👀 Team sees: agent name, client names, count, covered photo, comments.</li><li>🔒 Only the agent and leader see age, phone, gender and remarks.</li><li>📷 Photos (name list + roadshow selfie) are deleted 30 days after the leader approves, to save space.</li><li>🗑 After 3 months, phone, age, gender, remarks and the referrer\'s name are deleted automatically. The referred names stay.</li><li>📤 WhatsApp shares never include client names or numbers.</li></ul></div>' +
-      '<div style="text-align:center;margin:26px 0 8px"><button id="me-out" style="background:none;border:0;color:var(--faint);font-size:12.5px;text-decoration:underline">Sign out of this phone</button></div>';
+      '<div style="text-align:center;margin:20px 0 0"><button class="btn sm" id="me-pin">🔑 Change my PIN</button></div>' +
+      '<div style="text-align:center;margin:16px 0 8px"><button id="me-out" style="background:none;border:0;color:var(--faint);font-size:12.5px;text-decoration:underline">Sign out of this phone</button></div>';
     return html;
   }
   viewMe.wire = function (root) {
@@ -1238,6 +1262,24 @@
         if (y) api('settings', {rates: v, confirm: true}).then(function () { toast('Saved', 'Bonus rates updated.'); return refresh(true); }).catch(function (e) { toast('Not saved', errText(e)); });
       });
     };
+    q('#me-pin').onclick = function () { askNewPin(false); };
+    root.querySelectorAll('[data-rpin]').forEach(function (b) {
+      b.onclick = function () {
+        var a = agent(b.dataset.rpin);
+        confirmBox('Reset ' + a.name + '\'s PIN?', 'You get a temporary 6-digit PIN to send them. They sign in with it and must choose their own PIN straight away.<br>Their old PIN stops working. Phones already signed in stay signed in. Their referrals, leads and bonus stay as they are.', 'Reset PIN').then(function (y) {
+          if (!y) return;
+          api('resetPin', {agentId: a.id, confirm: true}).then(function (r) {
+            var msg = 'Hi ' + r.name + ', your REDEFINE Prospecting PIN was reset.\nSign in with your name and this temporary PIN: ' + r.temp + '\nThe app will then ask you to choose your own PIN.\n' + location.origin + location.pathname;
+            modal('<h2>🔑 Temporary PIN for ' + esc(r.name) + '</h2><div style="font-size:34px;font-weight:800;letter-spacing:6px;text-align:center;margin:14px 0;font-family:monospace">' + r.temp + '</div>' +
+              '<div class="muted">Send it to ' + esc(r.name) + ' privately (not in the group). They also need the team code.</div>' +
+              '<div class="btns"><button class="btn" data-copy>Copy</button><a class="btn gold" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(msg) + '">WhatsApp</a></div><div class="btns"><button class="btn" data-n>Done</button></div>', function (m, close) {
+              m.querySelector('[data-n]').onclick = close;
+              m.querySelector('[data-copy]').onclick = function () { try { navigator.clipboard.writeText(msg); toast('Copied', 'Paste it in a private chat.'); } catch (e) {} };
+            });
+          }).catch(function (e) { toast('Not reset', errText(e)); });
+        });
+      };
+    });
     root.querySelectorAll('[data-rm]').forEach(function (b) {
       b.onclick = function () {
         var a = agent(b.dataset.rm);
