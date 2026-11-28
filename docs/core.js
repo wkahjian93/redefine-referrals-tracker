@@ -6,7 +6,7 @@
    ai(prompt, imageBase64) -> text, version(bump) -> number. */
 var CORE = (function () {
   var TABLES = {
-    agents: ['id', 'name', 'pin', 'role', 'created', 'active', 'pinTemp'],
+    agents: ['id', 'name', 'pin', 'role', 'created', 'active', 'pinTemp', 'central', 'centralOff'],
     posts: ['id', 'agentId', 'kind', 'giver', 'text', 'photoId', 'count', 'status', 'created', 'purged', 'source', 'location', 'selfieId', 'reviewedAt', 'photoRemoved'],
     refs: ['id', 'postId', 'agentId', 'name', 'age', 'phone', 'gender', 'remarks', 'status', 'dup', 'created', 'purged', 'appt', 'apptAt', 'close', 'closeAt', 'called', 'calledAt', 'source', 'planAt', 'stepAt', 'noAppt', 'apptMark'],
     comments: ['id', 'postId', 'agentId', 'text', 'created'],
@@ -99,6 +99,81 @@ var CORE = (function () {
     var r = signIn({code: q.code, name: q.name, pin: q.pin}, store, true);
     return {me: r.me, leader: r.role === 'leader'};
   }
+  /* ---------- REDEFINE Login: the same phone + email + PIN on every REDEFINE app ----------
+     The phone signs in with the login service and sends its token (op 'rlsignin'); the server asks the login
+     service who it is (store.centralCheck, outside the lock) and finds the linked member. First time: old name +
+     old PIN links the old account (all referrals and bonus stay), or "I am new" makes a linked member. */
+  function titleName(v) {
+    v = str(v, 40).replace(/\s+/g, ' ');
+    if (v !== v.toUpperCase()) return v;   // already typed with care: keep it
+    return v.toLowerCase().replace(/(^|[\s\-'(\/])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); });
+  }
+  function rlSignIn(q, store, ag) {
+    var aid = String(ag.id), agents = store.load('agents'), a;
+    var me = agents.filter(function (x) { return String(x.central || '') === aid; })[0];
+    if (me) { if (String(me.active) === 'false') fail('removed'); return {me: me}; }
+    if (q.oldName) {
+      var name = str(q.oldName, 40).replace(/\s+/g, ' '), pin = str(q.oldPin, 12), fk = 'n:' + normName(name).slice(0, 40);
+      if (store.fails(0, fk) >= 8 || store.fails(0, 'all') >= 60) fail('too_many_tries');
+      a = agents.filter(function (x) { return normName(x.name) === normName(name); })[0];
+      if (!a || !a.pin || a.pin !== store.hash('rrt|' + pin + '|' + normName(name))) { store.fails(1, fk); store.fails(1, 'all'); fail('wrong_old'); }
+      if (String(a.active) === 'false') fail('removed');
+      if (a.central) fail('already_linked');
+      a.central = aid; a.centralOff = ''; a.pinTemp = '';
+      store.save('agents', agents);
+      log(store, a.id, 'login_link', 'old name + PIN');
+      return {me: a, linked: true};
+    }
+    if (!q.create) fail('not_linked_yet');
+    var nm = titleName(ag.name);
+    if (agents.some(function (x) { return normName(x.name) === normName(nm); })) fail('name_in_use');   // probably their old account
+    a = {id: newId(store, 8), name: nm, pin: '', role: 'agent', created: nowIso(store), active: 'true', pinTemp: '', central: aid, centralOff: ''};
+    agents.push(a); store.save('agents', agents);
+    store.version(true);
+    log(store, a.id, 'join', nm + ' (REDEFINE login)');
+    return {me: a, created: true};
+  }
+  // The leader links an existing member to a login account, once, by the agent's phone number.
+  function centralLink(q, store, me, leader, found) {
+    if (!leader) fail('leader_only');
+    var agents = store.load('agents'), a = agents.filter(function (x) { return x.id === String(q.agentId || ''); })[0];
+    if (!a || String(a.active) === 'false') fail('not_found');
+    if (!found) fail('no_login_match');
+    if (a.central) fail('already_linked');
+    if (agents.some(function (x) { return String(x.central || '') === String(found.id); })) fail('already_linked');
+    a.central = String(found.id); a.centralOff = '';
+    store.save('agents', agents); store.version(true);
+    log(store, me.id, 'login_link', a.name);
+    return {linked: true, name: found.name};
+  }
+  /* A member whose login was terminated or deleted is switched off like the leader's Remove (signed out on every
+     phone); a login restored brings back only members this switched off, never one the leader removed by hand.
+     Safety: an empty list, or a list with none of the linked logins, changes nothing. */
+  function loginSync(store, list) {
+    var none = function (why) { return {changed: 0, removed: 0, restored: 0, skipped: why || ''}; };
+    if (!list || !list.length) return none('empty');
+    var byId = {}; list.forEach(function (x) { byId[String(x.id)] = x; });
+    var agents = store.load('agents'), linked = agents.filter(function (x) { return x.central; });
+    if (!linked.length) return none();
+    if (linked.length >= 2 && !linked.some(function (x) { return byId[String(x.central)]; })) return none('no_match');
+    var gone = [], back = 0;
+    linked.forEach(function (x) {
+      var l = byId[String(x.central)], on = !!l && l.status === 'active', isOn = String(x.active) !== 'false';
+      if (!on && isOn) { x.active = 'false'; x.centralOff = '1'; gone.push(x.id); }
+      else if (on && !isOn && x.centralOff === '1') { x.active = 'true'; x.centralOff = ''; back++; }
+    });
+    if (!gone.length && !back) return none();
+    store.save('agents', agents);
+    if (gone.length) {
+      store.save('sessions', store.load('sessions').filter(function (x) { return gone.indexOf(x.agentId) < 0; }));
+      store.save('devices', store.load('devices').filter(function (x) { return gone.indexOf(x.agentId) < 0; }));
+      store.save('links', store.load('links').filter(function (x) { return gone.indexOf(x.agentId) < 0; }));
+      log(store, 'system', 'login_off', gone.length + ' member(s) switched off (login terminated)');
+    }
+    store.version(true);
+    return {changed: gone.length + back, removed: gone.length, restored: back};
+  }
+
   function signOut(q, store, me) {
     if (!q.token) return {signedOut: true};
     var h = store.hash('sess|' + str(q.token, 80));
@@ -264,7 +339,7 @@ var CORE = (function () {
       ver: v, now: nowIso(store), keepDays: KEEP_DAYS,
       me: {id: me.id, name: me.name, leader: leader, mustChange: me.pinTemp === 'true', devices: store.load('devices').filter(function (d) { return d.agentId === me.id; }).length},
       callDays: CALL_DAYS, callRemindDays: CALL_REMIND_DAYS, links: linksOf(store, me),
-      agents: store.load('agents').filter(function (a) { return String(a.active) !== 'false'; }).map(function (a) { return {id: a.id, name: a.name, role: a.role}; }),
+      agents: store.load('agents').filter(function (a) { return String(a.active) !== 'false'; }).map(function (a) { return {id: a.id, name: a.name, role: a.role, linked: !!a.central}; }),
       posts: store.load('posts').filter(recent).map(function (p) { return {id: p.id, agentId: p.agentId, kind: p.kind, giver: p.purged || !(leader || p.agentId === me.id) ? '' : p.giver, text: p.text, source: p.source || 'referral', location: p.location || '', selfie: p.selfieId && !p.purged ? 1 : 0, photo: p.purged ? 0 : photoIdsOf(p).length, photoRemoved: p.photoRemoved || '', reviewedAt: p.reviewedAt || '', photoDays: PHOTO_DAYS, count: +p.count || 0, status: p.status, created: p.created, purged: p.purged ? 1 : 0}; }),
       refs: store.load('refs').map(function (r) { return publicRef(r, leader || r.agentId === me.id); }),
       comments: store.load('comments').filter(recent),
@@ -725,8 +800,20 @@ var CORE = (function () {
 
   function handle(q, store) {
     if (!q || typeof q !== 'object') fail('bad_request');
+    // REDEFINE Login: at most every 10 minutes, the first request reads the login's agent list (outside the lock)
+    // and switches off terminated members. If the list cannot be read, nothing changes and the request goes on.
+    try { if (store.loginDue && store.loginDue()) { var ll = store.centralList(); if (ll) store.withLock(function () { loginSync(store, ll); }); } } catch (e) {}
+    if (q.op === 'rlsignin') {
+      var ag = store.centralCheck ? store.centralCheck(str(q.rltoken, 200)) : null;
+      if (!ag || !ag.id) fail('login_failed');
+      return store.withLock(function () { var r = rlSignIn(q, store, ag); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.me.role === 'leader'}, created: !!r.created, linked: !!r.linked, mustChange: false, token: newSession(store, r.me, q.device)}; });
+    }
+    if (q.op === 'centrallink') {   // look the phone up outside the lock, link inside it
+      var found = store.centralFindPhone ? store.centralFindPhone(str(q.phone, 30)) : null;
+      return store.withLock(function () { var w0 = who(q, store); var r = centralLink(q, store, w0.me, w0.leader, found); r.ok = true; return r; });
+    }
     if (q.op === 'signin') {
-      return store.withLock(function () { var r = signIn(q, store); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.role === 'leader'}, created: !!r.created, mustChange: r.me.pinTemp === 'true', token: newSession(store, r.me, q.device)}; });
+      return store.withLock(function () { if (q.create && store.prop('LOGIN_API')) fail('use_login'); var r = signIn(q, store); return {ok: true, me: {id: r.me.id, name: r.me.name, leader: r.role === 'leader'}, created: !!r.created, mustChange: r.me.pinTemp === 'true', token: newSession(store, r.me, q.device)}; });
     }
     if (q.op === 'feed') return store.withLock(function () { var r = feed(q, store); r.ok = true; return r; });
     if (q.op === 'pushtest' && q.delay) {   // "test in 15 s": wait OUTSIDE the lock so nobody else is blocked
@@ -744,6 +831,6 @@ var CORE = (function () {
     return store.withLock(function () { var w = who(q, store); var r = fn(q, store, w.me, w.leader); r.ok = true; return r; });
   }
 
-  return {buildOwnerReport: buildOwnerReport, monthlyReport: monthlyReport, PHOTO_DAYS: PHOTO_DAYS, callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
+  return {loginSync: loginSync, buildOwnerReport: buildOwnerReport, monthlyReport: monthlyReport, PHOTO_DAYS: PHOTO_DAYS, callReminders: callReminders, callState: callState, CALL_DAYS: CALL_DAYS, bonusTable: bonusTable, RATE_DEFAULT: RATE_DEFAULT, TABLES: TABLES, KEEP_DAYS: KEEP_DAYS, handle: handle, purge: purge, parseRead: parseRead, normPhone: normPhone, monthKey: monthKey, myt: myt, READ_PROMPT: READ_PROMPT};
 })();
 if (typeof module !== 'undefined') module.exports = CORE;

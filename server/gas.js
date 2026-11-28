@@ -143,6 +143,34 @@ var GAS = (function () {
     prop: function (k) { return P.getProperty(k) || ''; },
     fails: function (add, key) { var c = CacheService.getScriptCache(), k = 'fails_' + Utilities.base64EncodeWebSafe(String(key || 'all')).slice(0, 200), n = +(c.get(k) || 0); if (add) { c.put(k, String(n + add), 900); Utilities.sleep(800); } return n; },
     now: function () { return new Date(); },
+    // REDEFINE Login (Script properties LOGIN_API = login address, LOGIN_KEY = its read-only key).
+    centralCheck: function (token) {   // {id, name, phone} for an active agent, else null
+      var base = P.getProperty('LOGIN_API'); if (!base || !token) return null;
+      try {
+        var r = UrlFetchApp.fetch(base + '/api/check', {method: 'post', contentType: 'application/json', payload: JSON.stringify({token: token}), muteHttpExceptions: true});
+        if (r.getResponseCode() !== 200) return null;
+        var j = JSON.parse(r.getContentText() || '{}'); return j && j.ok && j.agent ? j.agent : null;
+      } catch (e) { console.warn('REDEFINE Login check failed: ' + e); return null; }
+    },
+    centralList: function () {   // [{id, name, phone, status}], or null when not set up or unreachable
+      var base = P.getProperty('LOGIN_API'), key = P.getProperty('LOGIN_KEY'); if (!base || !key) return null;
+      try {
+        var r = UrlFetchApp.fetch(base + '/svc/agents', {headers: {'x-service-key': key}, muteHttpExceptions: true});
+        if (r.getResponseCode() !== 200) { console.warn('REDEFINE Login list: HTTP ' + r.getResponseCode()); return null; }
+        var j = JSON.parse(r.getContentText() || '{}'); return j && j.ok && j.agents ? j.agents : null;
+      } catch (e) { console.warn('REDEFINE Login list failed: ' + e); return null; }
+    },
+    centralFindPhone: function (phone) {   // the active login account with this phone number, or null
+      var d = String(phone || '').replace(/\D/g, ''); if (d.charAt(0) === '0') d = '60' + d.slice(1);
+      if (!/^60\d{8,10}$/.test(d)) return null;
+      var list = GAS.centralList() || [];
+      return list.filter(function (a) { return a.phone === d && a.status === 'active'; })[0] || null;
+    },
+    loginDue: function () {   // true at most once every 10 minutes (and only when REDEFINE Login is set up)
+      if (!P.getProperty('LOGIN_API') || !P.getProperty('LOGIN_KEY')) return false;
+      var c = CacheService.getScriptCache(); if (c.get('rl_due')) return false;
+      c.put('rl_due', '1', 600); return true;
+    },
     random: Math.random,
     hash: function (t) { return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, t, Utilities.Charset.UTF_8).map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join(''); },
     version: function (bump) { var v = +(P.getProperty('VER') || 1); if (bump) { v++; P.setProperty('VER', String(v)); } return v; },

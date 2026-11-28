@@ -362,5 +362,62 @@ err(() => call(Object.assign({op: 'photo', postId: p1.post.id}, gm)), 'photo_gon
 ok(CORE.purge(s).wiped === 0, 'purge runs safely twice');
 ok(CORE.normPhone('+6012-345 6789') === '0123456789' && CORE.normPhone('12') === '', 'phone normalising');
 
+/* ---------- REDEFINE Login (phone + email + PIN) ---------- */
+{
+  const AG = {'tok-ali': {id: 'L1', name: 'ALI TAN', phone: '60121110001'}, 'tok-new': {id: 'L2', name: 'NUR AINA BINTI ALI', phone: '60121110002'},
+    'tok-mei': {id: 'L3', name: 'MEI LING', phone: '60121110003'}, 'tok-kj': {id: 'L4', name: 'WONG KAH JIAN', phone: '60194440000'}};
+  let listCalls = 0, due = false;
+  const LIST = () => Object.values(AG).map(a => Object.assign({status: a.off ? 'archived' : 'active'}, a));
+  const t = memStore({now: () => Date.parse('2026-11-10T02:00:00Z'), props: {LOGIN_API: 'https://login.test'}, check: tok => AG[tok] && !AG[tok].off ? AG[tok] : null,
+    list: () => { listCalls++; return LIST(); }, loginDue: () => { const d = due; due = false; return d; },
+    findPhone: p => { const d = String(p).replace(/\D/g, '').replace(/^0/, '60'); return LIST().find(a => a.phone === d && a.status === 'active') || null; }});
+  const c = q => CORE.handle(q, t);
+  const mk = (name, pin, role) => { const ag = t.load('agents'); ag.push({id: 'x' + ag.length, name, pin: t.hash('rrt|' + pin + '|' + name.toLowerCase()), role: role || 'agent', created: '', active: 'true', pinTemp: ''}); t.save('agents', ag); return 'x' + (ag.length - 1); };
+  const aliId = mk('Ali Tan', '1234'), meiId = mk('Mei Ling', '5678'), kjId = mk('Kah Jian', '9999', 'leader');
+  const kj = c({op: 'signin', code: 'test-leader-code', name: 'Kah Jian', pin: '9999'});
+
+  err(() => c({op: 'rlsignin', rltoken: 'nope'}), 'login_failed', 'unknown login token refused');
+  err(() => c({op: 'rlsignin', rltoken: 'tok-ali'}), 'not_linked_yet', 'first time: app asks old account or new');
+  err(() => c({op: 'rlsignin', rltoken: 'tok-ali', oldName: 'Ali Tan', oldPin: '0000'}), 'wrong_old', 'wrong old PIN refused'); t.resetFails();
+  const a1 = c({op: 'rlsignin', rltoken: 'tok-ali', oldName: ' ali  tan ', oldPin: '1234'});
+  ok(a1.linked && a1.me.id === aliId && a1.token, 'old name + old PIN links the old account (referrals and bonus stay)');
+  ok(c({op: 'sync', token: a1.token}).me.name === 'Ali Tan', 'the new session works');
+  ok(c({op: 'rlsignin', rltoken: 'tok-ali'}).me.id === aliId, 'next time it signs straight in');
+  err(() => c({op: 'rlsignin', rltoken: 'tok-new', oldName: 'Ali Tan', oldPin: '1234'}), 'already_linked', 'an account linked to another login cannot be taken');
+  err(() => c({op: 'rlsignin', rltoken: 'tok-mei', create: true}), 'name_in_use', 'no second member with an existing name');
+  const n1 = c({op: 'rlsignin', rltoken: 'tok-new', create: true});
+  ok(n1.created && n1.me.name === 'Nur Aina Binti Ali' && !n1.me.leader, 'a new agent gets a new member, name tidied, not a leader');
+  ok(c({op: 'rlsignin', rltoken: 'tok-new', create: true}).created === false && t.load('agents').filter(a => a.central === 'L2').length === 1, 'signing in again never makes a duplicate');
+  err(() => c({op: 'signin', code: 'test-team', name: 'Brand New', pin: '1234', create: true}), 'use_login', 'team code can no longer create members');
+  ok(c({op: 'signin', code: 'test-team', name: 'Mei Ling', pin: '5678'}).token, 'old sign-in still works for existing members');
+
+  // leader links a member once by phone
+  err(() => c({op: 'centrallink', token: a1.token, agentId: meiId, phone: '012-1110003'}), 'leader_only', 'only a leader can link');
+  err(() => c({op: 'centrallink', token: kj.token, agentId: meiId, phone: '019-9999999'}), 'no_login_match', 'unknown phone refused');
+  ok(c({op: 'centrallink', token: kj.token, agentId: meiId, phone: '012-111 0003'}).name === 'MEI LING', 'leader links Mei Ling by phone');
+  ok(c({op: 'sync', token: kj.token}).agents.find(a => a.id === meiId).linked === true, 'the app shows her as linked');
+  err(() => c({op: 'centrallink', token: kj.token, agentId: meiId, phone: '012-1110003'}), 'already_linked', 'linking twice refused');
+  ok(c({op: 'rlsignin', rltoken: 'tok-mei'}).me.id === meiId, 'after linking she signs straight in');
+
+  // terminated at REDEFINE Login: switched off on the next 10-minute check, like Remove; restore brings back
+  const devBefore = t.load('sessions').filter(x => x.agentId === aliId).length;
+  ok(devBefore >= 1, 'Ali has sessions before');
+  AG['tok-ali'].off = true; due = true;
+  err(() => c({op: 'sync', token: a1.token}), 'signed_out', 'terminated: his phone is signed out at the next check');
+  ok(t.load('agents').find(a => a.id === aliId).active === 'false' && t.load('agents').find(a => a.id === aliId).centralOff === '1', 'member switched off by the login check');
+  ok(c({op: 'sync', token: kj.token}).agents.every(a => a.id !== aliId), 'the team no longer lists him');
+  AG['tok-ali'].off = false; due = true;
+  c({op: 'sync', token: kj.token});
+  ok(t.load('agents').find(a => a.id === aliId).active === 'true', 'restored at the login: brought back');
+  ok(c({op: 'rlsignin', rltoken: 'tok-ali'}).me.id === aliId, 'and can sign in again');
+  // a member removed by the leader by hand is never brought back
+  c({op: 'removeAgent', token: kj.token, agentId: n1.me.id, confirm: true}); due = true; c({op: 'sync', token: kj.token});
+  ok(t.load('agents').find(a => a.id === n1.me.id).active === 'false', 'leader-removed member stays removed');
+  // safety rules
+  ok(CORE.loginSync(t, []).skipped === 'empty' && CORE.loginSync(t, [{id: 'ZZ', status: 'active'}]).skipped === 'no_match', 'empty or unrelated list changes nothing');
+  const calls = listCalls; c({op: 'sync', token: kj.token}); c({op: 'sync', token: kj.token});
+  ok(listCalls === calls, 'the list is only read when the 10-minute check is due');
+}
+
 console.log(pass + ' passed, ' + failN + ' failed');
 process.exit(failN ? 1 : 0);

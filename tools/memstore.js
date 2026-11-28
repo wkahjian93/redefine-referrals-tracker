@@ -19,6 +19,11 @@ module.exports = function memStore(opts = {}) {
     setNow: d => { clock = d ? new Date(d).getTime() : null; },
     random: opts.random || Math.random,
     hash: t => crypto.createHash('sha256').update(t, 'utf8').digest('hex'),
+    // REDEFINE Login stand-ins: tests set opts.check / opts.list / opts.findPhone / opts.loginDue
+    centralCheck: opts.check || (() => null),
+    centralList: opts.list || (() => null),
+    centralFindPhone: opts.findPhone || (() => null),
+    loginDue: opts.loginDue || (() => false),
     version: bump => (bump ? ++ver : ver),
     putPhoto: (name, b64) => { const id = 'ph' + (++n); photos[id] = b64; return id; },
     getPhoto: id => { if (!(id in photos)) throw new Error('gone'); return photos[id]; },
