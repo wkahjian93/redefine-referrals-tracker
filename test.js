@@ -419,5 +419,19 @@ ok(CORE.normPhone('+6012-345 6789') === '0123456789' && CORE.normPhone('12') ===
   ok(listCalls === calls, 'the list is only read when the 10-minute check is due');
 }
 
+// speed: the 20-second refresh of every phone must not take the lock (saves never queue behind it)
+{
+  const ls = memStore({now: () => Date.parse('2026-11-28T02:00:00Z')}), lc = q => CORE.handle(q, ls);
+  let locks = 0; const wl = ls.withLock; ls.withLock = fn => { locks++; return wl(fn); };
+  const tk = lc({op: 'signin', create: true, code: 'test-team', name: 'Lock Test', pin: '1234'}).token;
+  ls.tables.sessions.forEach(x => { x.lastSeen = '2026-11-20T02:00:00.000Z'; });
+  locks = 0; ok(lc({op: 'sync', token: tk}).me.name === 'Lock Test' && locks === 1, 'first refresh of the day takes the lock once (records last seen)');
+  ok(ls.tables.sessions[0].lastSeen.slice(0, 10) === '2026-11-28', 'last seen updated');
+  locks = 0; const sy = lc({op: 'sync', token: tk}); ok(sy.ok && sy.me && locks === 0, 'later refreshes take no lock');
+  ok(lc({op: 'sync', token: tk, ver: sy.ver}).same === true && locks === 0, '"nothing new" answer takes no lock');
+  err(() => lc({op: 'sync', token: 'x'.repeat(40)}), 'signed_out', 'unknown key still refused without the lock');
+  locks = 0; lc({op: 'comment', token: tk, postId: 'board', text: 'hi'}); ok(locks === 1, 'saves still take the lock');
+}
+
 console.log(pass + ' passed, ' + failN + ' failed');
 process.exit(failN ? 1 : 0);

@@ -88,17 +88,18 @@ var CORE = (function () {
     store.save('sessions', rows);
     return token;
   }
-  function who(q, store) {
+  function who(q, store, ro) {   // ro: read-only request; null = it needs a write, so take the lock
     if (q.token) {
       var h = store.hash('sess|' + str(q.token, 80)), rows = store.load('sessions'), s = rows.filter(function (x) { return x.token === h; })[0];
       if (!s) fail('signed_out');
       var me = store.load('agents').filter(function (a) { return a.id === s.agentId; })[0];
       if (!me || String(me.active) === 'false') fail('removed');
       var today = myt(nowIso(store)).slice(0, 10);
-      if (String(s.lastSeen).slice(0, 10) !== today) { s.lastSeen = nowIso(store); store.save('sessions', rows); }   // at most one write a day
+      if (String(s.lastSeen).slice(0, 10) !== today) { if (ro) return null; s.lastSeen = nowIso(store); store.save('sessions', rows); }   // at most one write a day
       return {me: me, leader: me.role === 'leader'};
     }
     // phones from before device keys: code + name + PIN (no shared lock-out counter here)
+    if (ro) return null;
     var r = signIn({code: q.code, name: q.name, pin: q.pin}, store, true);
     return {me: r.me, leader: r.role === 'leader'};
   }
@@ -831,6 +832,8 @@ var CORE = (function () {
       return {ok: true, read: parseRead(store.ai(READ_PROMPT, q.image))};   // the photo is used for this reading only and is not kept
     }
     var fn = OPS[q.op]; if (!fn) fail('bad_request');
+    // read-only requests (the 20-second refresh of every phone, photos) do not take the lock, so saves never queue behind them
+    if (q.op === 'sync' || q.op === 'photo') { var w2 = who(q, store, true); if (w2) { var r2 = fn(q, store, w2.me, w2.leader); r2.ok = true; return r2; } }
     return store.withLock(function () { var w = who(q, store); var r = fn(q, store, w.me, w.leader); r.ok = true; return r; });
   }
 

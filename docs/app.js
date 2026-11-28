@@ -132,8 +132,43 @@
 
   /* ---------- data & polling ---------- */
   function teamMonthTotal() { var mk = monthKey(new Date().toISOString()); return S.data ? S.data.refs.filter(function (r) { return r.status !== 'rejected' && monthKey(r.created) === mk; }).length : 0; }
+  /* ---------- instant actions: the screen changes on the tap, the server is told in the background ---------- */
+  S.outbox = LS.get('outbox', []);
+  function saveOutbox() { LS.set('outbox', S.outbox.map(function (j) { return {op: j.op, q: j.q, label: j.label, tries: j.tries || 0}; })); }
+  function act(op, q, apply, label, after) {
+    try { if (apply && S.data) apply(S.data, new Date().toISOString()); } catch (e) {}
+    if (S.data) { saveCache(); render(); }
+    S.outbox.push({op: op, q: q, label: label || 'change', after: after}); saveOutbox(); flushOutbox();
+  }
+  function flushOutbox() {
+    if (S.flushing || !S.outbox.length || !S.auth) return;
+    S.flushing = true; var j = S.outbox[0]; j.tries = (j.tries || 0) + 1;
+    api(j.op, j.q).then(ok, function (e) {
+      if (j.tries > 1 && /^already_marked$/.test(e.message)) return ok({});   // the first try did arrive, only its answer was lost
+      S.flushing = false;
+      if (e.message === 'network' || (e.message === 'server_error' && j.tries < 3)) { if (e.message === 'network' && !S.offline) { S.offline = true; render(); } clearTimeout(S.retryT); S.retryT = setTimeout(flushOutbox, j.tries < 4 ? 3000 : 15000); return; }
+      S.outbox.shift(); saveOutbox();
+      if (/^(signed_out|removed)$/.test(e.message)) { S.outbox = []; saveOutbox(); signOut(true, e.message); return; }
+      toast('Not saved: ' + j.label, errText(e) + ' The screen was put back.');
+      next();
+    });
+    function ok(r) { S.outbox.shift(); saveOutbox(); S.flushing = false; if (S.offline) { S.offline = false; render(); } if (j.after) { try { j.after(r); } catch (e) {} } next(); }
+    function next() { S.flushing = false; if (S.outbox.length) flushOutbox(); else { S.ver = 0; refresh(true); } }
+  }
+  window.addEventListener('online', function () { flushOutbox(); });
+  // a background refresh must never redraw the screen under the finger or over an open box
+  var lastTouch = 0;
+  document.addEventListener('pointerdown', function () { lastTouch = Date.now(); }, true);
+  function softRender() {
+    clearTimeout(S.softT);
+    var ae = document.activeElement, busy = document.getElementById('modal-root').children.length || (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.type !== 'checkbox') || Date.now() - lastTouch < 1500;
+    if (busy) { S.softT = setTimeout(softRender, 800); return; }
+    render();
+  }
   function refresh(silent) {
+    if (S.outbox.length) { flushOutbox(); return Promise.resolve(false); }   // saves still on the way: keep what the screen shows
     return api('sync', {ver: S.ver}).then(function (d) {
+      if (S.outbox.length) return false;   // a tap happened while this was loading: its save comes first
       if (d.same) { if (S.data && S.data.me && S.data.me.mustChange) setTimeout(function () { askNewPin(true); }, 400); return false; }
       var first = !S.data; S.data = d; S.ver = d.ver; S.offline = false;
       saveCache();
@@ -261,7 +296,7 @@
     }
     dailyReminderPopups();
     route.current === 'feed' || route.current === 'post' ? mark('feed') : null;
-    render();
+    if (first) render(); else softRender();
   }
   function mark(which) {
     if (!S.data) return;
@@ -542,8 +577,21 @@
     }
   }
   function sendComment(postId, text) {
-    return api('comment', {postId: postId, text: text}).then(function () { return refresh(true); }).then(function () {
-    }).catch(function (e) { toast('Not sent', errText(e)); });
+    act('comment', {postId: postId, text: text}, function (D, now) { D.comments.push({id: 'tmp' + Date.now(), postId: postId, agentId: D.me.id, text: text, created: now}); }, 'comment');
+    return Promise.resolve();
+  }
+  // the same change the server makes for a lead step, so the screen can show it straight away
+  function stepLocal(id, k, on, when) {
+    return function (D, now) {
+      var r = D.refs.filter(function (x) { return x.id === id; })[0]; if (!r) return;
+      var called = function () { if (!r.calledAt) { r.called = 'yes'; r.calledAt = now; } };
+      if (k === 'noappt') { if (on) { r.noAppt = 'yes'; r.planAt = ''; called(); } else r.noAppt = ''; }
+      else if (k === 'plan') { if (on) { r.planAt = new Date(when + ':00+08:00').toISOString(); r.noAppt = ''; called(); } else r.planAt = ''; }
+      else if (k === 'call') { if (on) called(); else { r.called = ''; r.calledAt = ''; } }
+      else if (on) { r[k] = D.me.leader ? 'approved' : 'pending'; r[k + 'At'] = k === 'appt' && r.planAt && r.planAt <= now ? r.planAt : now; if (k === 'appt') called(); }
+      else { r[k] = ''; r[k + 'At'] = ''; }
+      r.stepAt = now;
+    };
   }
   function viewFeed() {
     var posts = S.data.posts.filter(function (p) { return p.kind !== 'approach'; }).sort(function (a, b) { return a.created < b.created ? 1 : -1; });
@@ -676,11 +724,17 @@
     b.onclick = function () {
       var d = S.decide.d, ids = Object.keys(d), yes = ids.filter(function (k) { return d[k] === 'approved'; }).length;
       confirmBox('Save this decision?', '<b>' + yes + '</b> of ' + ids.length + ' names will count for bonus. ' + (ids.length - yes) + ' will not count.', 'Save').then(function (ok) {
-        if (!ok) return; b.disabled = true;
-        api('review', {postId: S.decide.post, decisions: d, confirm: true}).then(function () {
-          toast('Saved', yes + ' referral' + (yes === 1 ? '' : 's') + ' approved.'); S.decide = null;
-          return refresh(true).then(function () { var nx = S.data.posts.filter(function (x) { return x.kind === 'referral' && x.status === 'pending'; }).pop(); location.hash = nx ? '#/review/' + nx.id : '#/board'; });
-        }).catch(function (e) { b.disabled = false; toast('Not saved', errText(e)); });
+        if (!ok) return;
+        var pid = S.decide.post; S.decide = null;
+        act('review', {postId: pid, decisions: d, confirm: true}, function (D, now) {
+          var p = D.posts.filter(function (x) { return x.id === pid; })[0], mine = D.refs.filter(function (r) { return r.postId === pid; });
+          mine.forEach(function (r) { var x = d[r.id]; if (x === 'approved' || x === 'rejected' || x === 'pending') r.status = x; });
+          var st = mine.map(function (r) { return r.status; }), all = function (v) { return st.every(function (x) { return x === v; }); };
+          if (p) { p.status = all('approved') ? 'approved' : all('rejected') ? 'rejected' : st.indexOf('pending') >= 0 ? 'pending' : 'partial'; p.count = mine.filter(function (r) { return r.status !== 'rejected'; }).length; p.reviewedAt = p.status === 'pending' ? '' : now; }
+        }, 'approval');
+        if (S.sounds) SOUND.ding();
+        toast('Saved ✅', yes + ' referral' + (yes === 1 ? '' : 's') + ' approved.');
+        var nx = S.data.posts.filter(function (x) { return x.kind === 'referral' && x.status === 'pending'; }).pop(); location.hash = nx ? '#/review/' + nx.id : '#/board';
       });
     };
   };
@@ -1052,13 +1106,11 @@
       m.querySelector('[data-n]').onclick = close;
       m.querySelector('[data-y]').onclick = function () {
         var dd = m.querySelector('#ap-d').value, tt = m.querySelector('#ap-t').value; if (!dd || !tt) return toast('Pick a date and time', '');
-        var b = this; b.disabled = true;
-        api('step', {refId: r.id, step: 'plan', when: dd + 'T' + tt}).then(function () {
-          close(); if (S.sounds) SOUND.ding();
-          var lk = (S.data && S.data.links) || {};
-          toast('Appointment saved 📅', (lk.calendar ? 'Added to your REDEFINE Calendar. ' : '') + (lk.onfield ? 'On Field logs it next time you open it.' : 'Tip: connect Calendar and On Field in Me.'));
-          return refresh(true);
-        }).catch(function (e) { b.disabled = false; toast('Not saved', errText(e)); });
+        close();
+        act('step', {refId: r.id, step: 'plan', when: dd + 'T' + tt}, stepLocal(r.id, 'plan', true, dd + 'T' + tt), 'appointment');
+        if (S.sounds) SOUND.ding();
+        var lk = (S.data && S.data.links) || {};
+        toast('Appointment saved 📅', (lk.calendar ? 'Added to your REDEFINE Calendar. ' : '') + (lk.onfield ? 'On Field logs it next time you open it.' : 'Tip: connect Calendar and On Field in Me.'));
       };
     });
   }
@@ -1069,22 +1121,22 @@
         var r = S.data.refs.filter(function (x) { return x.id === b.dataset.ref; })[0], k = b.dataset.step;
         if (k === 'noappt') {
           return confirmBox('No appointment with ' + r.name + '?', 'You called but they did not agree to meet. It still counts as <b>called</b> (your lead bonus is kept). The lead moves to Done.', 'Yes').then(function (y) {
-            if (y) api('step', {refId: r.id, step: 'noappt'}).then(function () { toast('Saved', 'Counted as called. Next lead! 💪'); return refresh(true); }).catch(function (e) { toast('Not saved', errText(e)); });
+            if (y) { act('step', {refId: r.id, step: 'noappt'}, stepLocal(r.id, 'noappt', true), 'no appointment'); toast('Saved', 'Counted as called. Next lead! 💪'); }
           });
         }
         if (k === 'call') {
           var c = callInfo(r);
           return confirmBox('Called ' + r.name + '?', c.state === 'forfeit' ? 'It is past ' + ((S.data && S.data.callDays) || 14) + ' days, so the lead bonus is already forfeited, but calling still counts for your follow-up.' : 'Marking the call keeps your RM' + S.data.rates.lead + ' lead bonus for this name.', 'Yes, I called').then(function (y) {
-            if (!y) return; b.disabled = true;
-            api('step', {refId: r.id, step: 'call'}).then(function () { if (S.sounds) SOUND.ding(); toast('Call marked 📞', 'Next: book the appointment ☕'); return refresh(true); })
-              .catch(function (e) { b.disabled = false; toast('Not saved', errText(e)); });
+            if (!y) return;
+            act('step', {refId: r.id, step: 'call'}, stepLocal(r.id, 'call', true), 'call');
+            if (S.sounds) SOUND.ding(); toast('Call marked 📞', 'Next: book the appointment ☕');
           });
         }
         var what = k === 'appt' ? 'had an appointment with' : 'closed a case with';
         confirmBox(k === 'appt' ? 'Appointment done?' : 'Closed a case?', 'You ' + what + ' <b>' + esc(r.name) + '</b>. ' + (S.data.me.leader ? 'It counts right away.' : 'Your leader will approve it for the RM ' + S.data.rates[k] + ' bonus.'), 'Yes, mark it').then(function (y) {
-          if (!y) return; b.disabled = true;
-          api('step', {refId: r.id, step: k}).then(function () { if (S.sounds) SOUND.cheer(); toast(k === 'appt' ? 'Appointment marked ☕' : 'Case closed 🎯', k === 'close' ? 'That is what referrals are for. Well done!' : 'One step closer. Keep going!'); return refresh(true); })
-            .catch(function (e) { b.disabled = false; toast('Not saved', errText(e)); });
+          if (!y) return;
+          act('step', {refId: r.id, step: k}, stepLocal(r.id, k, true), k === 'appt' ? 'appointment done' : 'closed case');
+          if (S.sounds) SOUND.cheer(); toast(k === 'appt' ? 'Appointment marked ☕' : 'Case closed 🎯', k === 'close' ? 'That is what referrals are for. Well done!' : 'One step closer. Keep going!');
         });
       };
     });
@@ -1093,7 +1145,7 @@
         e.preventDefault();
         var label = {appt: 'appointment', close: 'closed case', call: 'call', plan: 'appointment date', noappt: 'no appointment'}[a.dataset.undo];
         confirmBox('Undo this?', 'Remove the ' + label + ' mark?', 'Undo', true).then(function (y) {
-          if (y) api('step', {refId: a.dataset.ref, step: a.dataset.undo, done: false}).then(function () { return refresh(true); }).catch(function (er) { toast('Not changed', errText(er)); });
+          if (y) act('step', {refId: a.dataset.ref, step: a.dataset.undo, done: false}, stepLocal(a.dataset.ref, a.dataset.undo, false), 'undo');
         });
       };
     });
@@ -1144,9 +1196,13 @@
       var dec = {}, yes = 0, no = 0;
       pendingSteps().forEach(function (r) { var d = S.stepDec[r.id]; dec[r.id] = {}; ['appt', 'close'].forEach(function (k) { if (r[k] === 'pending') { dec[r.id][k] = d[k] || 'approved'; if (dec[r.id][k] === 'approved') yes++; else no++; } }); });
       confirmBox('Save these decisions?', '<b>' + yes + '</b> update' + (yes === 1 ? '' : 's') + ' approved for bonus, ' + no + ' not approved.', 'Save').then(function (y) {
-        if (!y) return; b.disabled = true;
-        api('stepReview', {decisions: dec, confirm: true}).then(function () { S.stepDec = {}; toast('Saved', yes + ' approved.'); return refresh(true); }).then(function () { location.hash = '#/board'; })
-          .catch(function (e) { b.disabled = false; toast('Not saved', errText(e)); });
+        if (!y) return;
+        S.stepDec = {};
+        act('stepReview', {decisions: dec, confirm: true}, function (D, now) {
+          D.refs.forEach(function (r) { var x = dec[r.id]; if (!x) return; ['appt', 'close'].forEach(function (k) { if (r[k] === 'pending' && (x[k] === 'approved' || x[k] === 'rejected')) { r[k] = x[k]; if (x[k] === 'approved') r.stepAt = now; } }); });
+        }, 'approvals');
+        if (S.sounds) SOUND.ding();
+        toast('Saved ✅', yes + ' approved.'); location.hash = '#/board';
       });
     };
   };
@@ -1204,11 +1260,17 @@
       var rows = CORE.bonusTable(S.data.agents, S.data.posts, S.data.refs, mk, S.data.rates), tot = rows.reduce(function (s, x) { return s + x.total; }, 0), n = rows.filter(function (x) { return x.total; }).length;
       var waiting = rows.reduce(function (s, x) { return s + x.leadsWaiting + x.apptWaiting + x.closeWaiting; }, 0);
       confirmBox('Mark ' + monthName(mk) + ' as paid?', 'RM' + tot.toFixed(2) + ' to ' + n + ' agent' + (n === 1 ? '' : 's') + '. Each agent will see their paid amount.' + (waiting ? '<br><b>' + waiting + ' item(s) are still waiting approval</b> and are not included.' : ''), 'Mark paid').then(function (y) {
-        if (y) api('markPaid', {month: mk, confirm: true}).then(function () { toast('Marked paid', monthName(mk)); return refresh(true); }).catch(function (e) { toast('Not saved', errText(e)); });
+        if (y) {
+          act('markPaid', {month: mk, confirm: true}, function (D, now) {
+            var per = {}, total = 0; CORE.bonusTable(D.agents, D.posts, D.refs, mk, D.rates).forEach(function (x) { if (x.total) { per[x.id] = x.total; total += x.total; } });
+            D.paid = D.paid || {}; D.paid[mk] = {at: now, by: D.me.name, total: total, per: per};
+          }, 'paid mark');
+          toast('Marked paid ✅', monthName(mk));
+        }
       });
     };
     if (q('#bn-unpaid')) q('#bn-unpaid').onclick = function () {
-      confirmBox('Undo paid?', monthName(mk) + ' will show as not paid again.', 'Undo', true).then(function (y) { if (y) api('markPaid', {month: mk, confirm: true, undo: true}).then(function () { return refresh(true); }).catch(function (e) { toast('Not saved', errText(e)); }); });
+      confirmBox('Undo paid?', monthName(mk) + ' will show as not paid again.', 'Undo', true).then(function (y) { if (y) act('markPaid', {month: mk, confirm: true, undo: true}, function (D) { if (D.paid) delete D.paid[mk]; }, 'undo paid'); });
     };
     if (q('#bn-remind')) q('#bn-remind').onclick = function () { remindWhatsApp(); };
     if (q('#bn-report')) q('#bn-report').onclick = function () { reportWhatsApp(mk); };
